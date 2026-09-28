@@ -1,0 +1,257 @@
+<div class="wrap">
+  <header class="top">
+    <div class="sign">
+      <h1>Smart Traffic Signal Optimization</h1>
+      <p>Every junction is a rational player competing for the green light. A Nash equilibrium of their payoffs decides who goes, and it beats a fixed timer.</p>
+      <div class="meta">Data Science · Complex Engineering Problem 1: multi-agent traffic management with game theory</div>
+    </div>
+    <div class="top-side">
+      <button class="btn theme-btn" id="btnTheme" type="button" aria-label="Switch between light and dark theme">Light / dark</button>
+      <div class="team"><b>Team G2 · Batch B1</b><br>Harshwardhan (123A8004)<br>Bharath (123A8012)<br>Gregory (123A8020)<br>SIES Graduate School of Technology</div>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" id="t-sim" aria-selected="true" aria-controls="tab-sim" data-tab="sim">Live simulation</button>
+    <button class="tab" role="tab" id="t-game" aria-selected="false" aria-controls="tab-game" data-tab="game">Game model</button>
+    <button class="tab" role="tab" id="t-bench" aria-selected="false" aria-controls="tab-bench" data-tab="bench">Benchmark</button>
+    <button class="tab" role="tab" id="t-report" aria-selected="false" aria-controls="tab-report" data-tab="report">Project report</button>
+  </nav>
+
+  <!-- ============ LIVE SIMULATION ============ -->
+  <section id="tab-sim" role="tabpanel" aria-labelledby="t-sim">
+    <div class="sim-grid">
+      <div>
+        <div class="card">
+          <div class="toolbar">
+            <button class="btn icon" id="btnPlay" type="button" aria-label="Pause simulation"></button>
+            <button class="btn" id="btnReset" type="button">Restart</button>
+            <div class="seg" id="segSpeed" role="group" aria-label="Simulation speed">
+              <button type="button" data-v="1">1×</button><button type="button" data-v="2" class="on">2×</button><button type="button" data-v="4">4×</button><button type="button" data-v="8">8×</button>
+            </div>
+            <span class="grow"></span>
+            <div class="seg" id="segCtrl" role="group" aria-label="Signal controller shown on the map">
+              <button type="button" data-c="fixed">Fixed-time</button><button type="button" data-c="selfish">Selfish</button><button type="button" data-c="nash" class="on">Nash game</button>
+            </div>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="sim" width="800" height="800" role="img" aria-label="Top-down animation of a grid of signalised junctions with moving vehicles"></canvas>
+            <div class="clock" id="clock">0:00</div>
+          </div>
+          <div class="legend">
+            <span><i style="background:#22c55e"></i>green</span><span><i style="background:#f59e0b"></i>yellow</span><span><i style="background:#ef4444"></i>red</span>
+            <span><i class="sw" style="background:rgba(226,72,61,.55)"></i>queue heat</span>
+            <span><i class="sw" style="background:color-mix(in srgb,var(--accent) 40%,transparent)"></i>green corridor (two junctions serve the same road)</span>
+            <span>Click a junction to inspect it. Left-hand traffic.</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="toolbar">
+            <h3>All three controllers, same traffic</h3><span class="grow"></span>
+            <div class="seg" id="segMetric" role="group" aria-label="Chart metric">
+              <button type="button" data-m="d" class="on">Average delay</button><button type="button" data-m="q">Vehicles stopped</button>
+            </div>
+          </div>
+          <canvas id="chartLive" class="chart" role="img" aria-label="Line chart comparing the three controllers over time"></canvas>
+          <div class="score" id="score"></div>
+          <p class="hint" style="margin-top:8px">The three controllers run side by side on identical vehicle arrivals in the background, so the comparison is fair. The map shows whichever one you select.</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="kpis" id="kpis"></div>
+        </div>
+        <div class="card">
+          <h3>Traffic scenario</h3>
+          <div class="presets" id="presets">
+            <button class="btn" type="button" data-p="bal">Balanced</button>
+            <button class="btn" type="button" data-p="ew">East–West rush</button>
+            <button class="btn" type="button" data-p="heavy">Heavy load</button>
+            <button class="btn" type="button" data-p="wave">Rush-hour wave</button>
+          </div>
+          <div class="two" style="margin-top:10px">
+            <div><div class="hint">Grid (4 or 9 players)</div><div class="seg" id="segGrid" role="group" aria-label="Grid size"><button type="button" data-n="2" class="on">2×2</button><button type="button" data-n="3">3×3</button></div></div>
+            <div><div class="hint">Demand over time</div><select id="selProfile" aria-label="Demand profile"><option value="steady">Steady</option><option value="rush">Rush-hour wave</option></select></div>
+          </div>
+          <label class="row" for="rngRate"><span class="row-h"><span>Arrival rate per entry road</span><output id="outRate">8 veh/min</output></span></label>
+          <input type="range" id="rngRate" min="2" max="14" step="1" value="8">
+          <label class="row" for="rngBias"><span class="row-h"><span>Direction mix</span><output id="outBias">balanced</output></span></label>
+          <input type="range" id="rngBias" min="-60" max="60" step="5" value="0">
+          <div class="row-h hint"><span>North–South heavier</span><span>East–West heavier</span></div>
+          <label class="row" for="numSeed"><span class="row-h"><span>Random seed</span></span></label>
+          <input type="number" id="numSeed" value="42" min="1" max="99999" style="width:110px;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:6px 10px">
+          <span class="hint"> Same seed, same traffic. Restart to apply.</span>
+        </div>
+        <div class="card" id="inspector">
+          <h3>Junction inspector</h3>
+          <div class="chips" id="chips"></div>
+          <div id="inspBody" style="margin-top:10px"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GAME MODEL ============ -->
+  <section id="tab-game" role="tabpanel" aria-labelledby="t-game" hidden>
+    <div class="game-grid">
+      <div>
+        <div class="card">
+          <h2>The signal game</h2>
+          <p><b>Players.</b> Each signalised junction is one rational agent. A 2×2 grid has 4 players, a 3×3 grid has 9.</p>
+          <p><b>Strategies.</b> Player <i>i</i> picks which road gets the green next: <b>↕ North–South</b> or <b>↔ East–West</b>.</p>
+          <p><b>Payoff.</b> The player gains for every vehicle it can clear, and for waiting time it stops from piling up. It loses for switching (lost time), for pushing cars into a neighbour whose queue is already full, and it gains when a neighbour is about to send it a platoon on the same road.</p>
+          <div class="eq" aria-label="Payoff function">
+            u<sub>i</sub>(a<sub>i</sub>, a<sub>−i</sub>) = Σ<sub>k∈a<sub>i</sub></sub> ( q<sub>k</sub> + 0.4·m<sub>k</sub> + ω·w<sub>k</sub>/30 ) &nbsp;−&nbsp; σ·1[a<sub>i</sub> ≠ current]<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;− λ Σ<sub>j∈down(i,a<sub>i</sub>)</sub> q<sub>j←i</sub>·(1 − 0.7·1[a<sub>j</sub> = a<sub>i</sub>]) &nbsp;+&nbsp; κ Σ<sub>j∈up(i,a<sub>i</sub>)</sub> 0.6·q<sub>j→i</sub>·1[a<sub>j</sub> = a<sub>i</sub>]
+          </div>
+          <p class="hint" style="margin-top:8px">q = stopped vehicles near the stop line, m = vehicles still approaching, w = total time the queue has waited, σ = switching cost, λ = penalty for spilling into a neighbour, κ = bonus for green-wave coordination.</p>
+          <p><b>Equilibrium.</b> The signals run <i>best-response dynamics</i> once per second: each junction in turn picks its best action given the others' current choice, until nobody wants to change. That fixed point is a <b>pure-strategy Nash equilibrium</b>: no junction can do better by changing its own phase alone. Safety rules still apply: minimum green 8 s, maximum green 45 s, 2.5 s yellow, 1 s all-red.</p>
+          <p class="hint">Selfish = the same game with λ = κ = 0, so each junction ignores its neighbours. Fixed-time = a 20 s / 20 s timer.</p>
+        </div>
+        <div class="card params">
+          <h3>Tune the game</h3>
+          <div class="p"><label for="gpOmega">Fairness weight ω</label><output id="oOmega"></output><input type="range" id="gpOmega" min="0" max="2" step="0.1"><small>How strongly long waits pull a green toward that road.</small></div>
+          <div class="p"><label for="gpSigma">Switching cost σ</label><output id="oSigma"></output><input type="range" id="gpSigma" min="0" max="5" step="0.5"><small>Higher values keep the current green longer (less flip-flopping).</small></div>
+          <div class="p"><label for="gpLam">Spillback penalty λ</label><output id="oLam"></output><input type="range" id="gpLam" min="0" max="3" step="0.1"><small>Reluctance to send cars into a neighbour that is already jammed. Large values make junctions over-cautious and hurt.</small></div>
+          <div class="p"><label for="gpKap">Coordination bonus κ</label><output id="oKap"></output><input type="range" id="gpKap" min="0" max="3" step="0.1"><small>Reward for matching a neighbour that is releasing a platoon toward you.</small></div>
+          <div class="toolbar" style="margin-top:12px"><button class="btn" id="btnGpReset" type="button">Reset to defaults</button><span class="hint">Restart the simulation after tuning for a clean comparison.</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h2>Live payoff matrix</h2>
+          <div class="toolbar">
+            <span class="hint">Junction</span><div class="chips" id="chips2"></div>
+            <span class="hint">with neighbour</span><select id="selNbr" aria-label="Neighbouring junction"></select>
+          </div>
+          <div id="pmBox"></div>
+        </div>
+        <div class="card">
+          <h3>Best-response rounds at the latest decision</h3>
+          <div class="trace" id="trace"></div>
+          <p class="hint" id="traceNote" style="margin-top:8px"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BENCHMARK ============ -->
+  <section id="tab-bench" role="tabpanel" aria-labelledby="t-bench" hidden>
+    <div class="card">
+      <h2>Controlled experiment</h2>
+      <p>Runs all three controllers on the scenario currently set on the Live simulation tab, over several random seeds, and tests whether the differences are statistically real. Each seed gives every controller exactly the same vehicle arrivals.</p>
+      <div class="toolbar">
+        <span class="pill" id="benchScenario"></span>
+        <span class="hint">Seeds</span>
+        <select id="selSeeds" aria-label="Number of seeds"><option value="3">3</option><option value="5" selected>5</option><option value="8">8</option></select>
+        <span class="hint">Simulated time per run</span>
+        <select id="selDur" aria-label="Simulated duration"><option value="600">10 min</option><option value="900" selected>15 min</option><option value="1800">30 min</option></select>
+        <button class="btn primary" id="btnBench" type="button">Run benchmark</button>
+      </div>
+      <div class="progress" aria-hidden="true"><span id="benchBar"></span></div>
+      <p class="hint" id="benchStatus" style="margin-top:6px">Ready. A 5-seed, 15-minute run takes a few seconds.</p>
+    </div>
+    <div id="benchOut" hidden>
+      <div class="card"><h3>What the data says</h3><div class="summary" id="benchSummary"></div></div>
+      <div class="card"><h3>Results (mean ± standard deviation over seeds)</h3><div class="tbl-wrap"><table class="res" id="benchTable"></table></div>
+        <p class="hint" style="margin-top:8px">Delay counts every vehicle: finished trips, cars still on the map, and cars still waiting to enter. A controller cannot look good by leaving cars stuck outside. Bold marks the best value in each row. Paired t-test across seeds; p &lt; 0.05 is treated as significant.</p></div>
+      <div class="card"><h3>Comparison</h3><div class="bench-bars"><canvas id="bb1"></canvas><canvas id="bb2"></canvas><canvas id="bb3"></canvas><canvas id="bb4"></canvas></div></div>
+      <div class="card"><h3>Vehicles stopped over time (mean of seeds)</h3><canvas id="chartBench" class="chart tall" role="img" aria-label="Stopped vehicles over time for each controller"></canvas><div class="score" id="benchLegend"></div></div>
+    </div>
+  </section>
+
+  <!-- ============ REPORT ============ -->
+  <section id="tab-report" role="tabpanel" aria-labelledby="t-report" hidden>
+    <div class="report">
+      <div class="card">
+        <h2>1. Problem statement</h2>
+        <p><b>Complex Engineering Problem, option 1: Smart Traffic Signal Optimization using Game Theory.</b> Design and implement a multi-agent traffic management system where each traffic signal acts as a rational player competing for green-light allocation, to minimise overall congestion and vehicle waiting time.</p>
+        <h3>Objectives</h3>
+        <ul>
+          <li>Model each signalised junction as a rational agent with a strategy set and a payoff function.</li>
+          <li>Find each decision as a Nash equilibrium of the resulting non-cooperative game.</li>
+          <li>Build a microscopic traffic simulator to test it, and compare against fixed-time and non-cooperative (selfish) control.</li>
+          <li>Evaluate with data-science methods: repeated runs, common random numbers, confidence via paired t-tests.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>2. System model</h2>
+        <h3>Road network</h3>
+        <p>An N×N grid of junctions (N = 2 or 3), connected by two-way roads with one lane per direction, left-hand traffic. Vehicles enter at the 4N border roads by a Poisson process with a configurable rate and East–West / North–South mix, and leave at the far border. About a quarter turn left or right at each junction they cross.</p>
+        <h3>Vehicles</h3>
+        <p>Cars, two-wheelers, auto-rickshaws and buses with different lengths and speeds. Each vehicle follows a leader-based rule: it accelerates toward its desired speed but never faster than <code>√(2·b·d)</code>, where <i>d</i> is the free distance to the vehicle ahead or to the stop line. Vehicles never block the junction box.</p>
+        <h3>Signals</h3>
+        <p>Two phases per junction: North–South green or East–West green. Switching goes through yellow (2.5 s) then all-red (1 s). Minimum green 8 s, maximum 45 s. Decisions are taken once per simulated second.</p>
+        <h3>Assumptions and units</h3>
+        <p>1 px ≈ 0.3 m, free speed ≈ 45 px/s ≈ 49 km/h, step Δt = 0.1 s. Demand is synthetic, not calibrated to a real city.</p>
+      </div>
+      <div class="card">
+        <h2>3. Game-theoretic controller</h2>
+        <p>The game is <b>Γ = ( N, {A<sub>i</sub>}, {u<sub>i</sub>} )</b> with players N = junctions, actions A<sub>i</sub> = {N–S, E–W} and payoff u<sub>i</sub> as shown on the Game model tab. Payoffs depend on neighbours' actions through spillback and platoon coordination, so the game is genuinely coupled.</p>
+        <ol>
+          <li>Read detector data: queue q, approaching flow m and accumulated waiting w for each of the four approaches.</li>
+          <li>Start from the current phases. Junctions already in yellow or all-red are committed to their next phase.</li>
+          <li>Sweep the free junctions. Each picks its best response to everyone else's current action (ties keep the current action).</li>
+          <li>Repeat until a full sweep changes nothing. That profile is a pure Nash equilibrium (best-response cycles are cut off after 8 rounds; in our test runs every decision reached equilibrium).</li>
+          <li>Apply the profile subject to minimum green, maximum green and yellow/all-red safety timing.</li>
+        </ol>
+        <p>Because payoffs are built from congestion terms, best-response dynamics behave like a congestion-style game and settle quickly (typically 2 rounds), which is what makes it cheap enough to run every second. This is an empirical observation for this payoff design, not a proof.</p>
+        <h3>Baselines</h3>
+        <ul>
+          <li><b>Fixed-time:</b> 20 s N–S, 20 s E–W, no sensing.</li>
+          <li><b>Selfish adaptive:</b> the same payoff with λ = κ = 0. Each junction maximises only its own local benefit and ignores neighbours.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>4. Metrics</h2>
+        <ul>
+          <li><b>Average delay per vehicle (s):</b> trip time minus free-flow time, over all vehicles including those still waiting.</li>
+          <li><b>P95 delay:</b> the delay that 95% of vehicles stay under (fairness / worst case).</li>
+          <li><b>Vehicles stopped:</b> network-wide time average of vehicles below 2 px/s.</li>
+          <li><b>Stops per trip</b> and <b>throughput</b> (completed trips per minute).</li>
+        </ul>
+        <h3>Experimental design</h3>
+        <p>Common random numbers: for a given seed all controllers see identical arrival times, vehicle types and turning choices, so differences come from the controller alone. Results are averaged over seeds and compared with a paired two-sided t-test.</p>
+      </div>
+      <div class="card">
+        <h2>5. What to expect from the results</h2>
+        <ul>
+          <li>Adaptive control (selfish or Nash) consistently beats the fixed timer. In our test scenarios average delay fell by roughly 5% to 35%: the most at moderate-to-heavy load, less once the whole network is saturated and nothing can clear the queues. The gap was statistically significant in every scenario we ran.</li>
+          <li>The coupled Nash game adds a further, much smaller gain over the selfish version (typically 1–4%). It shows up mainly on the 3×3 grid and under heavy or wave demand, when short links spill back. In many scenarios the two are statistically indistinguishable.</li>
+          <li>Very large λ makes junctions over-cautious and increases delay, which shows the trade-off between private and network benefit.</li>
+        </ul>
+        <p class="hint">Run the Benchmark tab yourself for the exact numbers for any scenario. They are computed live, not pasted.</p>
+      </div>
+      <div class="card">
+        <h2>6. Limitations and future work</h2>
+        <ul>
+          <li>Single lane per direction, two-phase signals, no left-turn phases or pedestrians.</li>
+          <li>Synthetic demand and a simplified car-following model. It is not calibrated against real detector data or validated against SUMO.</li>
+          <li>Small grids. Larger networks and heterogeneous link lengths are the natural next step.</li>
+          <li>Extensions: reinforcement-learning agents to learn payoff weights, Bayesian games with uncertain demand, emergency-vehicle priority, and calibration on real city data.</li>
+        </ul>
+      </div>
+      <div class="card qa">
+        <h2>7. Likely viva questions</h2>
+        <details><summary>Why is this a game and not just an optimisation?</summary><p>Each junction controls only its own phase but its payoff depends on neighbours' phases (spillback and platoon arrival). That interdependence with decentralised decision makers is exactly a non-cooperative game.</p></details>
+        <details><summary>What is the equilibrium concept and why does it exist here?</summary><p>Pure-strategy Nash equilibrium: no player gains by unilaterally changing its phase. In a finite game a pure equilibrium is not guaranteed in general, so we run best-response dynamics with an 8-round cap and report how often it converges. In the simulations it converges essentially always, because the payoff is built from congestion-style terms.</p></details>
+        <details><summary>Why can Nash control beat the selfish one by only a little?</summary><p>Selfish control already reacts to queues, which is most of the benefit over a fixed timer. The coupling terms only matter when neighbouring links are close to full, so gains show up under heavy load.</p></details>
+        <details><summary>How do you know the improvement is real and not luck?</summary><p>All controllers see identical traffic per seed (common random numbers), we repeat over several seeds, and use a paired t-test. The benchmark tab prints the p-values.</p></details>
+        <details><summary>How did you keep the comparison fair?</summary><p>Delay includes vehicles still on the map and those waiting to enter, so a controller cannot look good by leaving cars outside the network. Safety rules (yellow, all-red, minimum green, no blocking the box) are identical for all controllers.</p></details>
+        <details><summary>Is it safe? Could two directions get green together?</summary><p>No. Only one phase per junction can be green, a yellow and an all-red interval separate phases, and the simulator logs zero stop-line crossings against a red signal in test runs.</p></details>
+      </div>
+      <div class="card">
+        <h2>References</h2>
+        <ul>
+          <li>Nash, J. (1950). Equilibrium points in n-person games. <i>PNAS</i>, 36(1), 48–49.</li>
+          <li>Monderer, D., &amp; Shapley, L. S. (1996). Potential games. <i>Games and Economic Behavior</i>, 14(1), 124–143.</li>
+          <li>Webster, F. V. (1958). <i>Traffic signal settings</i>. Road Research Technical Paper No. 39, HMSO.</li>
+          <li>Varaiya, P. (2013). Max pressure control of a network of signalized intersections. <i>Transportation Research Part C</i>, 36, 177–195.</li>
+          <li>Bazzan, A. L. C. (2009). Opportunities for multiagent systems and multiagent reinforcement learning in traffic control. <i>Autonomous Agents and Multi-Agent Systems</i>, 18, 342–375.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+  <div class="foot">Smart Traffic Signal Optimization using Game Theory · Team G2 · SIES Graduate School of Technology</div>
+</div>
