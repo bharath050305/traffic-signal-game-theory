@@ -4,3 +4,6 @@ __pycache__/
 *.log
 .claude/
 docs/node_modules/
+video/_work/
+video/_run.log
+video/*.mp4

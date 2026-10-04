@@ -193,3 +193,4 @@ table.res td.tag,table.res th.tag{text-align:left;white-space:normal}
 table.res td.sel{background:color-mix(in srgb,var(--accent) 14%,transparent);font-weight:700}
 .arrow{display:inline-block;min-width:1.5em;text-align:center}
 .arrow.ns{color:var(--tl-ns)}.arrow.ew{color:var(--tl-ew)}
+table.res.wpt td,table.res.wpt th{white-space:normal;vertical-align:top}
