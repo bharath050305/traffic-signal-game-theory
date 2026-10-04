@@ -6,14 +6,21 @@ Data Science, Complex Engineering Problem 1: a multi-agent traffic management sy
 
 ## Run it
 
-No install needed. Open `index.html` in a browser, or enable GitHub Pages (Settings, Pages, deploy from the `main` branch, root folder) to get a live link.
+No install needed. Open `index.html` in a browser (it works offline), or enable GitHub Pages (Settings, Pages, deploy from the `main` branch, root folder) to get a live link.
 
 ## What it does
 
 - **Live simulation:** 2×2 or 3×3 grid of signalised junctions with cars, bikes, auto-rickshaws and buses (left-hand traffic). Three controllers run side by side on identical traffic.
-- **Game model:** each junction is a player choosing North–South or East–West green. Decisions are a pure-strategy Nash equilibrium found by best-response dynamics every simulated second. Includes a live payoff matrix and tunable payoff weights.
-- **Benchmark:** repeated runs over several seeds (common random numbers), mean ± SD, 95th-percentile delay, paired t-tests, charts.
-- **Project report:** problem statement, model, algorithm, metrics, limitations, viva Q&A, references.
+- **Game model:** each junction is a player choosing North–South or East–West green. Decisions are a pure-strategy Nash equilibrium found by best-response dynamics every simulated second. Live payoff matrix and tunable payoff weights.
+- **Dynamic features (version 2):**
+  - **Block an approach** (accident, road work) for 60 to 180 s. Adaptive controllers see the blockage and stop giving it green; fixed-time cannot.
+  - **Send an ambulance.** Emergency preemption adds a priority term to the payoff and shortens the minimum green to 3 s; yellow and all-red are never skipped. Switch preemption off to compare.
+  - **Exact equilibrium analysis:** every second all 2^F joint plans are enumerated, pure Nash equilibria are counted and the best total-payoff plan is found, so the quality of the equilibrium is measured.
+  - **Signal timeline**, event log, idling-time and illustrative CO₂ indicators.
+  - **Benchmark with disruptions:** repeated seeded runs (common random numbers), mean ± SD, 95th-percentile delay, paired t-tests, CSV and JSON export, and a saved run history.
+  - **λ sweep:** how much should a junction care about its neighbours?
+  - **Share link** (the scenario is encoded in the URL) and keyboard shortcuts for presenting: Space, 1 2 3, B, A, R.
+- **Project report tab:** problem statement, model, algorithm, metrics, WP1 to WP7, limitations, viva Q&A, references.
 
 ## Controllers compared
 
@@ -26,36 +33,60 @@ No install needed. Open `index.html` in a browser, or enable GitHub Pages (Setti
 Payoff of junction *i* choosing phase *a*:
 
 ```
-u_i = Σ_{k∈a}(q_k + 0.4·m_k + ω·w_k/30) − σ·[switch] − λ·Σ_down q·(1 − 0.7·[same phase]) + κ·Σ_up 0.6·q·[same phase]
+u_i = Σ_{k∈a}(q_k + 0.4·m_k + ω·w_k/30 + E·e_k) − σ·[switch] − λ·Σ_down q·(1 − 0.7·[same phase]) + κ·Σ_up 0.6·q·[same phase]
 ```
 
-## Results (from our test runs, 5 seeds, 15 simulated minutes)
+(q queued, m approaching, w waiting time, e emergency vehicles, E = 60 when preemption is on; blocked approaches contribute nothing.)
 
-- Adaptive control (selfish or Nash) cut average delay by roughly 5% to 35% versus the fixed timer, depending on load, and the difference was statistically significant in every scenario we ran. The gain shrinks when the whole network is saturated.
-- The extra gain of Nash over selfish is small (typically 1–4%) and often not statistically significant. It shows up mainly on the 3×3 grid and under heavy or wave demand.
+## Results (10 seeds × 15 simulated minutes, synthetic demand)
+
+Average delay per vehicle, mean over seeds; p-values from paired t-tests.
+
+| Scenario | Fixed | Selfish | Nash | Nash vs fixed | Nash vs selfish |
+|---|---|---|---|---|---|
+| 2×2 balanced | 34.6 s | 25.2 s | 25.4 s | −26.6% (p < 0.001) | +0.5% (p = 0.53) |
+| 2×2 East–West +45% | 78.5 s | 29.7 s | 28.7 s | −63.4% (p < 0.001) | −3.2% (p = 0.18) |
+| 2×2 heavy load | 100.6 s | 87.3 s | 87.2 s | −13.3% (p < 0.001) | −0.1% (p = 0.90) |
+| 2×2 rush-hour wave | 112.2 s | 99.9 s | 99.8 s | −11.0% (p < 0.001) | −0.1% (p = 0.88) |
+| 3×3 balanced | 46.9 s | 38.0 s | 37.5 s | −20.0% (p < 0.001) | −1.4% (p = 0.29) |
+| 3×3 heavy load | 117.9 s | 109.5 s | 108.0 s | −8.4% (p < 0.001) | −1.3% (p = 0.14) |
+
+- Adaptive control cut average delay by 8% to 63% against the fixed timer; every test is significant.
+- **The coupled Nash game was not significantly better than the selfish adaptive controller in any scenario.** Most of the gain comes from reacting to queues at all. The game formulation adds an explainable rule, a checkable equilibrium, and a natural home for preemption and incidents.
+- **Ambulance trip** (2×2 balanced, 10 seeds): fixed-time 50.1 s, Nash without preemption 43.1 s, Nash with preemption 31.8 s.
+- **Equilibrium quality:** best-response dynamics converged in 100% of decisions, there was almost always exactly one pure equilibrium (1.03 to 1.20), and the equilibrium reached 97% to 98% of the range between the worst and best joint plan (it was the best plan in 57% to 84% of decisions).
 - Very large λ makes junctions over-cautious and increases delay.
 
-Run the Benchmark tab for exact numbers in any scenario. They are computed live.
+Everything above is reproduced by `node tests/experiments.js` (about 3 minutes), which writes `docs/results.json`. The Benchmark tab computes the same numbers live (choose 10 seeds, 15 min).
 
 ## Project structure
 
 ```
 index.html        built single-file app (generated by build.py)
 build.py          bundles src/ into index.html
-src/engine.js     traffic simulator, game-theory controllers, statistics
-src/ui.js         rendering, panels, charts, benchmark runner
+src/engine.js     traffic simulator, game-theory controllers, equilibrium analysis, statistics
+src/ui.js         rendering, panels, charts, benchmark, sweep, history, export
 src/style.css     styling (light and dark themes)
-src/body.html     page markup and report text
-tests/test.js     headless benchmark:  node tests/test.js '{"n":2,"rate":8,"bias":0}'
-tests/inv.js      checks that vehicles never overlap
-tests/inv2.js     checks that no vehicle crosses a stop line on red
+src/body.html     page markup and in-app report text
+tests/test.js         headless benchmark:  node tests/test.js '{"n":2,"rate":8,"bias":0}'
+tests/inv.js          checks that vehicles never overlap
+tests/inv2.js         checks that no vehicle crosses a stop line on red
+tests/features.js     checks for incidents, preemption and equilibrium analysis (17 checks)
+tests/experiments.js  reproduces every number in the report (writes docs/results.json)
+docs/                 project report (.docx and .pdf), presentation script, and the scripts that build them
 ```
 
-Rebuild after editing `src/`: `python3 build.py`
+Rebuild after editing `src/`: `python build.py`
+
+## Documents
+
+- `docs/Traffic_Signal_Game_Theory_Report.docx` (and `.pdf`): full project report in the department format, with the WP1 to WP7 mapping.
+- `docs/Presentation_Script.docx` (and `.pdf`): word-for-word demo script, technology explanation, key numbers and viva Q&A.
+- `docs/build_report.js`, `docs/build_script_doc.js`, `docs/make_figures.py`, `docs/capture_screenshots.py`, `docs/docx_to_pdf.ps1`: regenerate the documents (the report tables are generated from `docs/results.json`).
 
 ## Limitations
 
-Single lane per direction, two-phase signals, no pedestrians or left-turn phases. Demand is synthetic and not calibrated to real data; the model is not validated against SUMO. Small grids only.
+Single lane per direction, two-phase signals, no pedestrians or left-turn phases. Demand is synthetic and not calibrated to real data; the model is not validated against SUMO. Small grids only, and ten seeds cannot detect very small effects (such as Nash versus selfish). The CO₂ figure is an illustration from stated assumptions (0.8 L/h idle burn, 2.31 kg CO₂ per litre), not a measurement.
 
 ## References
 

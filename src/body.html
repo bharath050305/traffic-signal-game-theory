@@ -30,6 +30,7 @@
               <button type="button" data-v="1">1×</button><button type="button" data-v="2" class="on">2×</button><button type="button" data-v="4">4×</button><button type="button" data-v="8">8×</button>
             </div>
             <span class="grow"></span>
+            <button class="btn" id="btnShare" type="button" title="Copy a link that reproduces this scenario">Share link</button>
             <div class="seg" id="segCtrl" role="group" aria-label="Signal controller shown on the map">
               <button type="button" data-c="fixed">Fixed-time</button><button type="button" data-c="selfish">Selfish</button><button type="button" data-c="nash" class="on">Nash game</button>
             </div>
@@ -42,7 +43,9 @@
             <span><i style="background:#22c55e"></i>green</span><span><i style="background:#f59e0b"></i>yellow</span><span><i style="background:#ef4444"></i>red</span>
             <span><i class="sw" style="background:rgba(226,72,61,.55)"></i>queue heat</span>
             <span><i class="sw" style="background:color-mix(in srgb,var(--accent) 40%,transparent)"></i>green corridor (two junctions serve the same road)</span>
-            <span>Click a junction to inspect it. Left-hand traffic.</span>
+            <span><i class="sw" style="background:repeating-linear-gradient(45deg,#e2483d 0 3px,#fff 3px 6px)"></i>blocked approach</span>
+            <span><i style="background:#fff;border:1.5px solid #e2483d"></i>ambulance</span>
+            <span>Click a junction to inspect it. Left-hand traffic. Keys: Space pause · 1 2 3 controller · B block · A ambulance · R restart</span>
           </div>
         </div>
         <div class="card">
@@ -55,6 +58,12 @@
           <canvas id="chartLive" class="chart" role="img" aria-label="Line chart comparing the three controllers over time"></canvas>
           <div class="score" id="score"></div>
           <p class="hint" style="margin-top:8px">The three controllers run side by side on identical vehicle arrivals in the background, so the comparison is fair. The map shows whichever one you select.</p>
+        </div>
+        <div class="card">
+          <div class="toolbar"><h3>Signal timeline (last 4 minutes)</h3><span class="grow"></span>
+            <span class="pill"><i style="background:var(--tl-ns)"></i>↕ N–S green</span><span class="pill"><i style="background:var(--tl-ew)"></i>↔ E–W green</span><span class="pill"><i style="background:var(--tl-x)"></i>yellow / all-red</span></div>
+          <canvas id="chartTL" class="chart" role="img" aria-label="Phase timeline of every junction for the controller shown on the map"></canvas>
+          <p class="hint" style="margin-top:6px">One row per junction for the controller on the map. Fixed-time is a regular pattern. The Nash controller stretches and shortens greens to follow the queues, and neighbouring junctions line up into green waves.</p>
         </div>
       </div>
 
@@ -82,6 +91,24 @@
           <label class="row" for="numSeed"><span class="row-h"><span>Random seed</span></span></label>
           <input type="number" id="numSeed" value="42" min="1" max="99999" style="width:110px;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:6px 10px">
           <span class="hint"> Same seed, same traffic. Restart to apply.</span>
+        </div>
+        <div class="card" id="disrupt">
+          <h3>Disrupt the network <span class="hint" style="font-weight:400">live · the same event hits all three controllers</span></h3>
+          <div class="two">
+            <div><div class="hint">Block an approach at the selected junction</div><select id="selBlkDir" aria-label="Approach to block"><option value="N">from the north</option><option value="S">from the south</option><option value="W" selected>from the west</option><option value="E">from the east</option></select></div>
+            <div><div class="hint">For</div><select id="selBlkDur" aria-label="Block duration"><option value="60">60 s</option><option value="120" selected>120 s</option><option value="180">180 s</option></select></div>
+          </div>
+          <div class="toolbar" style="margin-top:8px"><button class="btn" id="btnBlock" type="button">Block approach (B)</button><span class="hint" id="blkNote"></span></div>
+          <div class="two" style="margin-top:6px">
+            <div style="grid-column:1/-1"><div class="hint">Ambulance enters the network</div><select id="selAmb" aria-label="Ambulance entry road"></select></div>
+          </div>
+          <div class="toolbar" style="margin-top:8px"><button class="btn" id="btnAmb" type="button">Send ambulance (A)</button>
+            <label class="hint" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="chkPre" checked> Emergency preemption (Selfish and Nash)</label></div>
+          <div id="ambResult" class="why" style="margin-top:8px">No ambulance sent yet. Fixed-time has no sensing, so it cannot give way.</div>
+        </div>
+        <div class="card">
+          <h3>Event log <span class="hint" style="font-weight:400">for the controller on the map</span></h3>
+          <div class="evlog" id="evLog" aria-live="polite"></div>
         </div>
         <div class="card" id="inspector">
           <h3>Junction inspector</h3>
@@ -132,6 +159,13 @@
           <div class="trace" id="trace"></div>
           <p class="hint" id="traceNote" style="margin-top:8px"></p>
         </div>
+        <div class="card" id="eqCard">
+          <h2>Equilibrium analysis <span class="hint" style="font-weight:400">live, exact</span></h2>
+          <p class="hint">Every second the simulator lists <b>all</b> joint plans of the free junctions (2<sup>N</sup> of them), checks which are Nash equilibria, and finds the plan with the highest total payoff. This shows how good the equilibrium found by best-response dynamics really is.</p>
+          <div class="kpis" id="eqKpis" style="grid-template-columns:repeat(3,1fr)"></div>
+          <div class="tbl-wrap"><table class="res" id="eqTable"></table></div>
+          <p class="hint" id="eqNote" style="margin-top:6px"></p>
+        </div>
       </div>
     </div>
   </section>
@@ -144,9 +178,11 @@
       <div class="toolbar">
         <span class="pill" id="benchScenario"></span>
         <span class="hint">Seeds</span>
-        <select id="selSeeds" aria-label="Number of seeds"><option value="3">3</option><option value="5" selected>5</option><option value="8">8</option></select>
+        <select id="selSeeds" aria-label="Number of seeds"><option value="3">3</option><option value="5" selected>5</option><option value="8">8</option><option value="10">10</option></select>
         <span class="hint">Simulated time per run</span>
         <select id="selDur" aria-label="Simulated duration"><option value="600">10 min</option><option value="900" selected>15 min</option><option value="1800">30 min</option></select>
+        <span class="hint">Disruptions</span>
+        <select id="selDisrupt" aria-label="Disruptions injected during the run"><option value="none">None</option><option value="incident">Blocked approaches</option><option value="amb">Ambulance runs</option><option value="both">Both</option></select>
         <button class="btn primary" id="btnBench" type="button">Run benchmark</button>
       </div>
       <div class="progress" aria-hidden="true"><span id="benchBar"></span></div>
@@ -156,8 +192,27 @@
       <div class="card"><h3>What the data says</h3><div class="summary" id="benchSummary"></div></div>
       <div class="card"><h3>Results (mean ± standard deviation over seeds)</h3><div class="tbl-wrap"><table class="res" id="benchTable"></table></div>
         <p class="hint" style="margin-top:8px">Delay counts every vehicle: finished trips, cars still on the map, and cars still waiting to enter. A controller cannot look good by leaving cars stuck outside. Bold marks the best value in each row. Paired t-test across seeds; p &lt; 0.05 is treated as significant.</p></div>
+      <div class="card"><div class="toolbar"><h3>Keep the evidence</h3><span class="grow"></span>
+        <button class="btn" id="btnCsv" type="button">Download CSV (every seed)</button><button class="btn" id="btnJson" type="button">Download JSON</button></div>
+        <p class="hint">Each finished benchmark is also saved in this browser (see Run history below), so the numbers you quote tomorrow are reproducible.</p></div>
       <div class="card"><h3>Comparison</h3><div class="bench-bars"><canvas id="bb1"></canvas><canvas id="bb2"></canvas><canvas id="bb3"></canvas><canvas id="bb4"></canvas></div></div>
       <div class="card"><h3>Vehicles stopped over time (mean of seeds)</h3><canvas id="chartBench" class="chart tall" role="img" aria-label="Stopped vehicles over time for each controller"></canvas><div class="score" id="benchLegend"></div></div>
+    </div>
+    <div class="card" id="sweepCard">
+      <h2>Parameter sweep: how much should a junction care about its neighbours?</h2>
+      <p>Runs the Nash controller for several values of the spillback penalty λ on the current scenario (3 seeds, 10 simulated minutes each) and plots average delay, with the fixed-time and selfish results as reference lines. λ = 0 is the selfish game.</p>
+      <div class="toolbar"><button class="btn primary" id="btnSweep" type="button">Run λ sweep</button><button class="btn" id="btnApplyLam" type="button" hidden>Apply best λ</button><span class="hint" id="sweepStatus">Ready.</span></div>
+      <div class="progress" aria-hidden="true"><span id="sweepBar"></span></div>
+      <div id="sweepOut" hidden>
+        <canvas id="chartSweep" class="chart tall" role="img" aria-label="Average delay against the spillback penalty lambda"></canvas>
+        <div class="score" id="sweepLegend"></div>
+        <div class="summary" id="sweepSummary" style="margin-top:10px"></div>
+      </div>
+    </div>
+    <div class="card" id="histCard">
+      <div class="toolbar"><h2>Run history</h2><span class="grow"></span><button class="btn" id="btnHistClear" type="button">Clear</button></div>
+      <div class="tbl-wrap"><table class="res" id="histTable"></table></div>
+      <p class="hint" id="histNote" style="margin-top:6px"></p>
     </div>
   </section>
 
@@ -204,27 +259,57 @@
         </ul>
       </div>
       <div class="card">
-        <h2>4. Metrics</h2>
+        <h2>4. Dynamic features (version 2)</h2>
+        <p>The first version was a fixed demonstration. Version 2 lets the audience change the world while it runs, and measures how each controller copes.</p>
+        <ul>
+          <li><b>Blocked approach (incident).</b> A stalled vehicle or road work closes one approach of a junction for 60 to 180 s. Detectors let the adaptive controllers see the blockage, so they stop spending green on it, and the spillback penalty makes upstream junctions hold traffic back. Fixed-time cannot see it and keeps giving green to an empty stop line.</li>
+          <li><b>Ambulance with preemption.</b> An emergency vehicle enters the network. For the adaptive controllers, an ambulance waiting on a phase adds a large term to that phase's payoff and shortens the minimum green to 3 s; the usual 2.5 s yellow and 1 s all-red still apply. You can switch preemption off to see the difference.</li>
+          <li><b>Exact equilibrium analysis.</b> Each second the simulator enumerates all 2<sup>F</sup> joint plans of the free junctions, counts the pure Nash equilibria and finds the plan with the largest total payoff, so the quality of the equilibrium that best-response dynamics found is measured, not assumed.</li>
+          <li><b>Signal timeline.</b> A time-space view of every junction's phase for the controller on the map.</li>
+          <li><b>Benchmark with disruptions,</b> CSV and JSON export, a saved run history, and a <b>λ sweep</b> that finds how much neighbour-awareness pays.</li>
+          <li><b>Shareable scenarios.</b> The page address encodes the grid, load, seed and game weights. Copy it with the Share link button to reproduce a run exactly.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>5. Metrics</h2>
         <ul>
           <li><b>Average delay per vehicle (s):</b> trip time minus free-flow time, over all vehicles including those still waiting.</li>
           <li><b>P95 delay:</b> the delay that 95% of vehicles stay under (fairness / worst case).</li>
           <li><b>Vehicles stopped:</b> network-wide time average of vehicles below 2 px/s.</li>
           <li><b>Stops per trip</b> and <b>throughput</b> (completed trips per minute).</li>
+          <li><b>Idling time (vehicle-hours)</b> and an <b>illustrative CO<sub>2</sub> estimate</b>: stopped vehicle-seconds × an assumed 0.8 L/h idle fuel burn × 2.31 kg CO<sub>2</sub> per litre of petrol. A rough indicator, not a measurement.</li>
+          <li><b>Ambulance trip time (s):</b> from dispatch to leaving the network.</li>
+          <li><b>Equilibrium efficiency:</b> (total payoff of the chosen profile − worst profile) ÷ (best − worst), averaged over decisions.</li>
         </ul>
         <h3>Experimental design</h3>
         <p>Common random numbers: for a given seed all controllers see identical arrival times, vehicle types and turning choices, so differences come from the controller alone. Results are averaged over seeds and compared with a paired two-sided t-test.</p>
       </div>
       <div class="card">
-        <h2>5. What to expect from the results</h2>
+        <h2>6. What the results show</h2>
         <ul>
-          <li>Adaptive control (selfish or Nash) consistently beats the fixed timer. In our test scenarios average delay fell by roughly 5% to 35%: the most at moderate-to-heavy load, less once the whole network is saturated and nothing can clear the queues. The gap was statistically significant in every scenario we ran.</li>
-          <li>The coupled Nash game adds a further, much smaller gain over the selfish version (typically 1–4%). It shows up mainly on the 3×3 grid and under heavy or wave demand, when short links spill back. In many scenarios the two are statistically indistinguishable.</li>
-          <li>Very large λ makes junctions over-cautious and increases delay, which shows the trade-off between private and network benefit.</li>
+          <li>Over 10 seeds of 15 simulated minutes, adaptive control (selfish or Nash) cut average delay by <b>8% to 63%</b> against the fixed timer across six scenarios, and every paired t-test had p &lt; 0.001. The gain is largest when one direction is much busier (East&ndash;West +45%: 63%) and smallest under heavy load and in the rush-hour wave, where the network is close to saturation.</li>
+          <li>The coupled Nash game was <b>not significantly better than the selfish controller in any scenario</b> (&minus;3.2% to +0.5%, p between 0.14 and 0.90). Most of the gain comes from reacting to queues at all. What the game formulation adds is an explainable decision rule, an equilibrium that can be checked, and a natural place for preemption and incidents.</li>
+          <li>Ambulance preemption cut the mean ambulance trip from 43.1 s (same controller, preemption off) to 31.8 s, against 50.1 s for fixed-time.</li>
+          <li>Very large &lambda; makes junctions over-cautious and increases delay (on the 2&times;2 grid, 25.3 s at &lambda; = 0 to 29.6 s at &lambda; = 3).</li>
         </ul>
-        <p class="hint">Run the Benchmark tab yourself for the exact numbers for any scenario. They are computed live, not pasted.</p>
+        <p class="hint">Run the Benchmark tab yourself for exact numbers in any scenario. They are computed live, not pasted. The full table is in the written report and is reproduced by <code>node tests/experiments.js</code>.</p>
       </div>
       <div class="card">
-        <h2>6. Limitations and future work</h2>
+        <h2>7. Complex engineering problem attributes (WP1 to WP7)</h2>
+        <div class="tbl-wrap"><table class="res" style="white-space:normal">
+          <thead><tr><th>WP</th><th>Attribute</th><th style="text-align:left">Evidence in this project</th></tr></thead>
+          <tbody>
+            <tr><td>WP1</td><td>Depth of knowledge</td><td style="text-align:left">Game theory (Nash equilibrium, potential games), traffic flow, statistics, simulation and web engineering are all needed together.</td></tr>
+            <tr><td>WP2</td><td>Conflicting requirements</td><td style="text-align:left">Junction benefit versus network benefit; delay versus fairness; adaptivity versus safety timings; ambulance priority versus everyone else's wait.</td></tr>
+            <tr><td>WP3</td><td>Depth of analysis</td><td style="text-align:left">No standard solution: the payoff, equilibrium computation and evaluation design needed original modelling and experiments.</td></tr>
+            <tr><td>WP4</td><td>Familiarity of issues</td><td style="text-align:left">Multi-agent signal games with spillback, platoon coordination and emergency preemption are beyond textbook exercises.</td></tr>
+            <tr><td>WP5</td><td>Applicable codes</td><td style="text-align:left">Yellow and all-red clearance, minimum and maximum green follow signal-timing practice (Webster; IRC guidance). Where our simplifications depart from it, we say so.</td></tr>
+            <tr><td>WP6</td><td>Stakeholders</td><td style="text-align:left">Commuters, bus riders, emergency services, traffic police and city planners want different things.</td></tr>
+            <tr><td>WP7</td><td>Interdependence</td><td style="text-align:left">Each signal's payoff depends on its neighbours; demand, controllers, safety rules and metrics feed each other.</td></tr>
+          </tbody></table></div>
+      </div>
+      <div class="card">
+        <h2>8. Limitations and future work</h2>
         <ul>
           <li>Single lane per direction, two-phase signals, no left-turn phases or pedestrians.</li>
           <li>Synthetic demand and a simplified car-following model. It is not calibrated against real detector data or validated against SUMO.</li>
@@ -233,7 +318,9 @@
         </ul>
       </div>
       <div class="card qa">
-        <h2>7. Likely viva questions</h2>
+        <h2>9. Likely viva questions</h2>
+        <details><summary>How good is the equilibrium your signals find? Could a better joint plan exist?</summary><p>Often yes, and we measure it. The Game model tab enumerates every joint plan (16 for a 2×2 grid, up to 512 for 3×3), marks the Nash equilibria and the best total-payoff plan. Over 10 seeds of 15 simulated minutes, best-response dynamics found the very best joint plan in 57% to 84% of decisions (more often on the small grid) and on average reached 97% to 98% of the range between the worst and best plan. The pure equilibrium was almost always unique (1.03 to 1.20 per decision). The remaining gap is the price of anarchy of this game in practice.</p></details>
+        <details><summary>How does the ambulance get priority without breaking safety?</summary><p>Preemption only changes <i>when</i> the controller is allowed to start a change: the minimum green drops from 8 s to 3 s for the phase that is holding the ambulance back. Yellow (2.5 s) and all-red (1 s) are never skipped, so conflicting greens are impossible.</p></details>
         <details><summary>Why is this a game and not just an optimisation?</summary><p>Each junction controls only its own phase but its payoff depends on neighbours' phases (spillback and platoon arrival). That interdependence with decentralised decision makers is exactly a non-cooperative game.</p></details>
         <details><summary>What is the equilibrium concept and why does it exist here?</summary><p>Pure-strategy Nash equilibrium: no player gains by unilaterally changing its phase. In a finite game a pure equilibrium is not guaranteed in general, so we run best-response dynamics with an 8-round cap and report how often it converges. In the simulations it converges essentially always, because the payoff is built from congestion-style terms.</p></details>
         <details><summary>Why can Nash control beat the selfish one by only a little?</summary><p>Selfish control already reacts to queues, which is most of the benefit over a fixed timer. The coupling terms only matter when neighbouring links are close to full, so gains show up under heavy load.</p></details>

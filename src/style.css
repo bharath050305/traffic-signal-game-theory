@@ -178,3 +178,18 @@ table.res td.win{font-weight:700}
 #benchOut{margin-top:14px}
 .report .card{margin-top:0}
 .canvas-wrap + .legend{margin-top:10px}
+
+/* version 2: dynamic features */
+:root{--tl-ns:#0d9488;--tl-ew:#d97706;--tl-x:#8b929d}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--tl-ns:#2dd4bf;--tl-ew:#fbbf24;--tl-x:#5b6878}}
+:root[data-theme="dark"]{--tl-ns:#2dd4bf;--tl-ew:#fbbf24;--tl-x:#5b6878}
+.evlog{max-height:220px;overflow:auto;font-size:13.5px;display:grid;gap:4px;align-content:start}
+.evlog .ev{display:grid;grid-template-columns:46px 1fr;gap:8px;padding:4px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--line);border-left-width:3px}
+.evlog .ev b{font-variant-numeric:tabular-nums;color:var(--muted);font-weight:600}
+.evlog .ev.warn{border-left-color:#e2483d}.evlog .ev.amb{border-left-color:var(--accent)}.evlog .ev.ok{border-left-color:var(--good)}
+.evlog .empty{color:var(--muted);font-size:13px}
+#disrupt select{width:100%}
+table.res td.tag,table.res th.tag{text-align:left;white-space:normal}
+table.res td.sel{background:color-mix(in srgb,var(--accent) 14%,transparent);font-weight:700}
+.arrow{display:inline-block;min-width:1.5em;text-align:center}
+.arrow.ns{color:var(--tl-ns)}.arrow.ew{color:var(--tl-ew)}

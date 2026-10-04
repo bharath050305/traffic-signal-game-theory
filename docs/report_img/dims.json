@@ -1,0 +1,150 @@
+{
+ "f01_live_simulation.jpg": [
+  2160,
+  1500
+ ],
+ "f02_kpis.jpg": [
+  750,
+  567
+ ],
+ "f03_three_controllers_chart.jpg": [
+  1125,
+  609
+ ],
+ "f04_timeline_nash.jpg": [
+  1125,
+  404
+ ],
+ "f05_timeline_fixed.jpg": [
+  1125,
+  404
+ ],
+ "f06_inspector.jpg": [
+  750,
+  653
+ ],
+ "f07_scenario_panel.jpg": [
+  750,
+  611
+ ],
+ "f08_incident_map.jpg": [
+  1125,
+  1341
+ ],
+ "f09_event_log.jpg": [
+  750,
+  134
+ ],
+ "f10_ambulance_map.jpg": [
+  1125,
+  1341
+ ],
+ "f11_ambulance_result.jpg": [
+  750,
+  659
+ ],
+ "f12_event_log_ambulance.jpg": [
+  750,
+  417
+ ],
+ "f13_grid_3x3.jpg": [
+  1125,
+  1341
+ ],
+ "f14_timeline_3x3.jpg": [
+  1125,
+  489
+ ],
+ "f15_payoff_matrix.jpg": [
+  938,
+  696
+ ],
+ "f16_best_response_rounds.jpg": [
+  938,
+  264
+ ],
+ "f17_tune_game.jpg": [
+  938,
+  609
+ ],
+ "f18_equilibrium_analysis.jpg": [
+  938,
+  956
+ ],
+ "f19_signal_game_model.jpg": [
+  938,
+  831
+ ],
+ "f20_bench_summary.jpg": [
+  1896,
+  303
+ ],
+ "f21_bench_table.jpg": [
+  1896,
+  705
+ ],
+ "f22_bench_bars.jpg": [
+  1896,
+  402
+ ],
+ "f23_bench_stopped_over_time.jpg": [
+  1896,
+  536
+ ],
+ "f24_bench_disruptions_summary.jpg": [
+  1896,
+  437
+ ],
+ "f25_bench_disruptions_table.jpg": [
+  1896,
+  764
+ ],
+ "f26_lambda_sweep.jpg": [
+  1896,
+  885
+ ],
+ "f27_run_history.jpg": [
+  1896,
+  378
+ ],
+ "f28_dark_theme.jpg": [
+  2160,
+  1500
+ ],
+ "d1_architecture.jpg": [
+  1745,
+  994
+ ],
+ "d2_decision_cycle.jpg": [
+  1745,
+  640
+ ],
+ "c1_delay_by_scenario.jpg": [
+  1481,
+  719
+ ],
+ "c2_gain_vs_fixed.jpg": [
+  1612,
+  715
+ ],
+ "c3_lambda_sweep.jpg": [
+  1556,
+  698
+ ],
+ "c4_ambulance.jpg": [
+  1091,
+  703
+ ],
+ "c5_disruptions.jpg": [
+  1401,
+  703
+ ],
+ "c6_equilibrium_quality.jpg": [
+  1615,
+  627
+ ],
+ "sies_logo.png": [
+  455,
+  226
+ ]
+}

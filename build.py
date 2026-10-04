@@ -2,7 +2,7 @@
 from pathlib import Path
 root = Path(__file__).parent
 s = root / "src"
-css, body, eng, ui = [(s / f).read_text() for f in ("style.css", "body.html", "engine.js", "ui.js")]
+css, body, eng, ui = [(s / f).read_text(encoding="utf-8") for f in ("style.css", "body.html", "engine.js", "ui.js")]
 html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -27,5 +27,5 @@ html = f"""<!DOCTYPE html>
 </body>
 </html>
 """
-(root / "index.html").write_text(html)
+(root / "index.html").write_text(html, encoding="utf-8")
 print("index.html written,", len(html) // 1024, "KB")

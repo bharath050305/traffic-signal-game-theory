@@ -1,7 +1,8 @@
 /* ================= TRAFFIC + GAME-THEORY ENGINE ================= */
 const CFG = {
   W: 800, dt: 0.1, box: 22, stopOff: 36, laneOff: 11, vmax: 45, acc: 16, brk: 26, minGap: 5,
-  detect: 150, far: 260, yellow: 2.5, allred: 1.0, minGreen: 8, maxGreen: 45, fixedGreen: 20, pTurn: 0.25
+  detect: 150, far: 260, yellow: 2.5, allred: 1.0, minGreen: 8, maxGreen: 45, fixedGreen: 20, pTurn: 0.25,
+  emW: 60, emMinGreen: 3
 };
 const GP_DEFAULT = { omega: 1.0, sigma: 2.0, lam: 0.6, kap: 0.5 };
 const VTYPES = [
@@ -10,6 +11,8 @@ const VTYPES = [
   { n: 'auto', L: 14, w: 9, p: 0.12, vs: 0.9 },
   { n: 'bus', L: 32, w: 11, p: 0.08, vs: 0.85 }
 ];
+const AMB = { n: 'amb', L: 20, w: 10, vs: 1.25 };
+const KEYNAME = { N: 'north', S: 'south', E: 'east', W: 'west' };
 const PALETTE = ['#f3f4f6', '#f3f4f6', '#f3f4f6', '#f3f4f6', '#c8cdd5', '#c8cdd5', '#c8cdd5', '#8b929d', '#8b929d', '#2b3038', '#2b3038', '#b3202a', '#1f4e9c', '#3d6fa6', '#7b1e26', '#d8d1bf', '#3f5c4b', '#c9a227'];
 
 function mulberry32(a) {
@@ -32,6 +35,8 @@ class Sim {
     this.seed = o.seed || 1;
     this.vis = !!o.vis;
     this.keepDelays = !!o.keepDelays;
+    this.preempt = o.preempt !== false;   // emergency-vehicle preemption for the adaptive controllers
+    this.analyze = !!o.analyze;           // enumerate all joint plans each decision (live equilibrium analysis)
     this.rng = mulberry32(this.seed);
     const n = this.n;
     this.C = [];
@@ -48,14 +53,15 @@ class Sim {
     this.obs = this.freshObs();
     this.plan = this.inter.map(() => 0);
     this.rounds = 0; this.converged = true; this.trace = []; this.lastU = this.inter.map(() => [0, 0]);
+    this.incidents = []; this.events = []; this.em = []; this.tl = []; this.eq = null;
   }
 
   resetStats() {
-    this.st = { exited: 0, delaySum: 0, stopSum: 0, stopTSum: 0, qInt: 0, maxQ: 0, brRounds: 0, brN: 0, brConv: 0, sw: 0, exitTimes: [], delays: [] };
+    this.st = { exited: 0, delaySum: 0, stopSum: 0, stopTSum: 0, qInt: 0, maxQ: 0, brRounds: 0, brN: 0, brConv: 0, sw: 0, exitTimes: [], delays: [], eqN: 0, eqEff: 0, eqOpt: 0, eqNE: 0 };
     this.series = []; this.serT = 0;
   }
   freshObs() {
-    return this.inter.map(() => ({ q: { N: 0, S: 0, E: 0, W: 0 }, m: { N: 0, S: 0, E: 0, W: 0 }, w: { N: 0, S: 0, E: 0, W: 0 } }));
+    return this.inter.map(() => ({ q: { N: 0, S: 0, E: 0, W: 0 }, m: { N: 0, S: 0, E: 0, W: 0 }, w: { N: 0, S: 0, E: 0, W: 0 }, e: { N: 0, S: 0, E: 0, W: 0 }, blk: { N: false, S: false, E: false, W: false } }));
   }
   demandMult() {
     if (this.profile === 'rush') return 0.5 + 1.0 * Math.sin(Math.PI * ((this.t % 900) / 900));
@@ -94,7 +100,7 @@ class Sim {
         this.vehicles.push({
           id: this.nextId++, axis: e.axis, line: e.line, dir: e.dir, p: ep, v: CFG.vmax * a.vs * 0.8,
           L: a.ty.L, w: a.ty.w, type: a.ty.n, color: a.color, vs: a.vs, t0: it.t0, dist: 0, stopT: 0, curStop: 0,
-          stops: 0, was: false, tr: a.tr, ti: 0, ang: this.headingOf(e.axis, e.dir), dx: 0, dy: 0
+          stops: 0, was: false, tr: a.tr, ti: 0, ang: this.headingOf(e.axis, e.dir), dx: 0, dy: 0, emg: !!it.emg
         });
       }
     }
@@ -107,7 +113,34 @@ class Sim {
   }
   demand(id, axis) {
     const o = this.obs[id], ks = axis === 0 ? ['N', 'S'] : ['W', 'E'];
-    return o.q[ks[0]] + o.q[ks[1]] + o.m[ks[0]] + o.m[ks[1]];
+    let s = 0; for (const k of ks) if (!o.blk[k]) s += o.q[k] + o.m[k];
+    return s;
+  }
+  emKeys(id, axis) {
+    const o = this.obs[id], ks = axis === 0 ? ['N', 'S'] : ['W', 'E'];
+    return ks.filter(k => o.e[k] > 0 && !o.blk[k]);
+  }
+
+  /* ---- disruptions: blocked approach and emergency vehicle ---- */
+  log(m) { if (!this.vis) return; this.events.push({ t: this.t, m }); if (this.events.length > 80) this.events.shift(); }
+  addIncident(j, key, dur) {
+    if (j < 0 || j >= this.inter.length || !'NSEW'.includes(key)) return false;
+    this.incidents.push({ j, key, t0: this.t, t1: this.t + dur });
+    this.log('Incident: approach from the ' + KEYNAME[key] + ' at J' + (j + 1) + ' blocked for ' + Math.round(dur) + ' s');
+    return true;
+  }
+  sendAmbulance(axis, line, dir) {
+    const e = this.entries.find(x => x.axis === axis && x.line === line && x.dir === dir);
+    if (!e) return false;
+    e.q.unshift({ t0: this.t, a: { ty: AMB, color: '#ffffff', vs: AMB.vs, tr: new Array(16).fill(1) }, emg: true });
+    this.log('Ambulance dispatched: ' + (axis === 'h' ? 'row ' : 'column ') + (line + 1) + ', from the ' + (axis === 'h' ? (dir > 0 ? 'west' : 'east') : (dir > 0 ? 'north' : 'south')));
+    return true;
+  }
+  ambulancesActive() {
+    let n = 0;
+    for (const v of this.vehicles) if (v.emg) n++;
+    for (const e of this.entries) for (const it of e.q) if (it.emg) n++;
+    return n;
   }
 
   /* payoff of player i choosing phase a (0 = North-South green, 1 = East-West green) given the others' plan */
@@ -115,7 +148,11 @@ class Sim {
     const I = this.inter[i], o = this.obs[i];
     const ks = a === 0 ? ['N', 'S'] : ['W', 'E'];
     let u = 0;
-    for (const k of ks) u += o.q[k] + 0.4 * o.m[k] + P.omega * o.w[k] / 30;
+    for (const k of ks) {
+      if (o.blk[k]) continue;                       // a blocked approach cannot use a green
+      u += o.q[k] + 0.4 * o.m[k] + P.omega * o.w[k] / 30;
+      if (this.preempt) u += CFG.emW * o.e[k];      // emergency vehicle waiting for this phase
+    }
     if (a !== I.phase) u -= P.sigma;
     if (P.lam > 0 || P.kap > 0) {
       const outs = a === 0 ? [['S', 'N'], ['N', 'S']] : [['E', 'W'], ['W', 'E']];
@@ -149,6 +186,31 @@ class Sim {
     this.plan = plan; this.rounds = rounds; this.converged = !changed; this.trace = trace; this.P = P;
     this.lastU = this.inter.map((_, i) => [this.util(i, 0, plan, P), this.util(i, 1, plan, P)]);
     this.st.brRounds += rounds; this.st.brN++; if (!changed) this.st.brConv++;
+    if (this.analyze) this.analyzeEq(P);
+  }
+
+  /* Enumerate every joint plan of the free junctions: count the pure Nash equilibria and find the welfare optimum
+     (welfare = sum of all players' payoffs). Shows how good the equilibrium found by best-response dynamics is. */
+  analyzeEq(P) {
+    const N = this.inter.length, base = this.inter.map(I => I.status === 'green' ? I.phase : 1 - I.phase);
+    const free = []; for (let i = 0; i < N; i++) if (this.inter[i].status === 'green') free.push(i);
+    const F = free.length; if (!F) return;
+    const all = [], M = 1 << F;
+    for (let m = 0; m < M; m++) {
+      const pl = base.slice(); for (let k = 0; k < F; k++) pl[free[k]] = (m >> k) & 1;
+      let ne = true, w = 0;
+      for (let i = 0; i < N; i++) w += this.util(i, pl[i], pl, P);
+      for (let k = 0; k < F && ne; k++) { const i = free[k]; if (this.util(i, 1 - pl[i], pl, P) > this.util(i, pl[i], pl, P) + 1e-9) ne = false; }
+      all.push({ pl, w, ne });
+    }
+    all.sort((a, b) => b.w - a.w);
+    const key = this.plan.join(''), wOpt = all[0].w, wWorst = all[all.length - 1].w;
+    const fi = all.findIndex(x => x.pl.join('') === key), found = fi >= 0 ? all[fi] : null;
+    const nNE = all.reduce((c, x) => c + (x.ne ? 1 : 0), 0);
+    const wF = found ? found.w : wOpt, eff = wOpt - wWorst > 1e-9 ? (wF - wWorst) / (wOpt - wWorst) : 1;
+    this.eq = { F, M, nNE, wOpt, wWorst, wF, eff, foundIsOpt: wF >= wOpt - 1e-9, foundIsNE: !!(found && found.ne), foundRank: fi + 1, foundPl: found ? found.pl : null,
+      top: all.slice(0, 8).map(x => ({ pl: x.pl, w: x.w, ne: x.ne, found: x.pl.join('') === key })) };
+    const st = this.st; st.eqN++; st.eqEff += eff; st.eqNE += nNE; if (this.eq.foundIsOpt) st.eqOpt++;
   }
 
   startSwitch(I) { I.status = 'yellow'; I.timer = 0; this.st.sw++; }
@@ -164,14 +226,22 @@ class Sim {
     for (const I of this.inter) {
       if (I.status !== 'green') continue;
       const want = this.plan[I.id];
-      if (want !== I.phase && I.greenT >= CFG.minGreen) this.startSwitch(I);
+      const emOpp = this.preempt ? this.emKeys(I.id, 1 - I.phase) : [], emCur = this.preempt ? this.emKeys(I.id, I.phase) : [];
+      const preempting = emOpp.length > 0 && emCur.length === 0;
+      if (want !== I.phase && I.greenT >= (preempting ? CFG.emMinGreen : CFG.minGreen)) {
+        if (preempting && I.greenT < CFG.minGreen) this.log('J' + (I.id + 1) + ' pre-empts the phase for the ambulance (from the ' + KEYNAME[emOpp[0]] + ')');
+        this.startSwitch(I);
+      }
       else if (I.greenT >= CFG.maxGreen && this.demand(I.id, 1 - I.phase) > 0) this.startSwitch(I);
     }
   }
   controlTick(dt) {
     for (const I of this.inter) { I.timer += dt; if (I.status === 'green') I.greenT += dt; }
     this.decT += dt;
-    if (this.decT >= 1.0 - 1e-9) { this.decT = 0; this.decide(); }
+    if (this.decT >= 1.0 - 1e-9) {
+      this.decT = 0; this.decide();
+      if (this.vis) { this.tl.push(this.inter.map(I => I.status === 'green' ? I.phase : 2)); if (this.tl.length > 300) this.tl.shift(); }
+    }
     for (const I of this.inter) {
       if (I.status === 'yellow' && I.timer >= CFG.yellow) { I.status = 'allred'; I.timer = 0; }
       else if (I.status === 'allred' && I.timer >= CFG.allred) { I.phase = 1 - I.phase; I.status = 'green'; I.timer = 0; I.greenT = 0; }
@@ -182,7 +252,11 @@ class Sim {
     const dt = CFG.dt, W = CFG.W, H = CFG.box, SO = CFG.stopOff, C = this.C, n = this.n;
     this.spawn(dt);
     this.controlTick(dt);
+    if (this.incidents.length) {
+      this.incidents = this.incidents.filter(x => { if (this.t < x.t1) return true; this.log('Incident cleared at J' + (x.j + 1) + ' (' + KEYNAME[x.key] + ' approach)'); return false; });
+    }
     const obs = this.obs = this.freshObs();
+    for (const x of this.incidents) obs[x.j].blk[x.key] = true;
     const lanes = new Map();
     for (const v of this.vehicles) {
       const k = v.axis + v.line + (v.dir > 0 ? 'p' : 'n');
@@ -211,11 +285,13 @@ class Sim {
             else if (I.status === 'yellow') ok = (v.v * v.v / (2 * CFG.brk)) >= dStop - 1;
           }
           if (ok && ld) { const rear = ld.p * dir - ld.L / 2; if (rear < c * dir + H + v.L + 2) ok = false; }
+          const key = v.axis === 'v' ? (dir > 0 ? 'N' : 'S') : (dir > 0 ? 'W' : 'E');
+          if (ok && obs[I.id].blk[key]) ok = false;
           must = !ok;
           if (dStop < CFG.far) {
-            const key = v.axis === 'v' ? (dir > 0 ? 'N' : 'S') : (dir > 0 ? 'W' : 'E');
             const o = obs[I.id];
             if (dStop < CFG.detect && v.v < 8) { o.q[key]++; o.w[key] += v.curStop; } else o.m[key]++;
+            if (v.emg) o.e[key]++;
           }
         }
         let d = gap; if (must) d = Math.min(d, dStop);
@@ -250,6 +326,7 @@ class Sim {
           const s = this.st, delay = Math.max(0, (this.t - v.t0) - v.dist / (CFG.vmax * v.vs));
           if (this.keepDelays) s.delays.push(delay);
           s.exited++; s.delaySum += delay; s.stopSum += v.stops; s.stopTSum += v.stopT; s.exitTimes.push(this.t);
+          if (v.emg) { this.em.push({ tt: this.t - v.t0, stops: v.stops, stopT: v.stopT }); this.log('Ambulance cleared the network in ' + (this.t - v.t0).toFixed(0) + ' s (' + v.stops + ' stop' + (v.stops === 1 ? '' : 's') + ')'); }
         } else keep.push(v);
       }
       this.vehicles = keep;
@@ -285,7 +362,9 @@ class Sim {
     return {
       t, exited: s.exited, delay: cnt ? sum / cnt : 0, stops: s.exited ? s.stopSum / s.exited : 0,
       avgQ: t ? s.qInt / t : 0, maxQ: s.maxQ, thr60: et.length, thr: t ? s.exited / (t / 60) : 0,
-      inNet: this.vehicles.length, pend, brRounds: s.brN ? s.brRounds / s.brN : 0, brConv: s.brN ? s.brConv / s.brN : 1, sw: s.sw
+      inNet: this.vehicles.length, pend, brRounds: s.brN ? s.brRounds / s.brN : 0, brConv: s.brN ? s.brConv / s.brN : 1, sw: s.sw,
+      idleH: s.qInt / 3600, amb: this.em.length ? mean(this.em.map(x => x.tt)) : NaN, nAmb: this.em.length,
+      eqEff: s.eqN ? s.eqEff / s.eqN : NaN, eqOpt: s.eqN ? s.eqOpt / s.eqN : NaN, eqNE: s.eqN ? s.eqNE / s.eqN : NaN
     };
   }
   allDelays() {
@@ -334,4 +413,4 @@ function pairedT(a, b) {           // tests mean(a-b) != 0
   const t = m / (s / Math.sqrt(n));
   return { t, p: ibeta((n - 1) / 2, 0.5, (n - 1) / ((n - 1) + t * t)), md: m };
 }
-if (typeof module !== 'undefined') module.exports = { Sim, CFG, GP_DEFAULT, makeSim, mean, sd, pairedT };
+if (typeof module !== 'undefined') module.exports = { Sim, CFG, GP_DEFAULT, makeSim, mean, sd, pairedT, KEYNAME };

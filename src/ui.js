@@ -9,14 +9,17 @@ const PRESETS = {
   wave: { rate: 9, bias: 0, profile: 'rush' }
 };
 const S = { n: 2, rate: 8, bias: 0, profile: 'steady', seed: 42, ctrl: 'nash', speed: 2, playing: true, sel: 0, nbr: null,
-  metric: 'd', tab: 'sim', gp: Object.assign({}, GP_DEFAULT), sims: {}, bench: null };
+  metric: 'd', tab: 'sim', gp: Object.assign({}, GP_DEFAULT), sims: {}, bench: null, preempt: true, sweep: null };
+const IDLE_L_PER_H = 0.8, KG_CO2_PER_L = 2.31;   // illustrative assumptions for the idling estimate
+const KEYLAB = { N: 'north', S: 'south', E: 'east', W: 'west' };
 let COL = {};
 
 function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 function readColors() {
   COL = { road: cssVar('--road'), line: cssVar('--roadline'), walk: cssVar('--walk'), block: cssVar('--block'), pill: cssVar('--pill'),
     accent: cssVar('--accent'), ink: cssVar('--ink'), muted: cssVar('--muted'), grid: cssVar('--line'), surface: cssVar('--surface2'),
-    fixed: cssVar('--c-fixed'), selfish: cssVar('--c-selfish'), nash: cssVar('--c-nash') };
+    fixed: cssVar('--c-fixed'), selfish: cssVar('--c-selfish'), nash: cssVar('--c-nash'),
+    ns: cssVar('--tl-ns'), ew: cssVar('--tl-ew'), tlx: cssVar('--tl-x') };
   COL.dark = isDark(); BG.key = '';
 }
 function ccol(c) { return COL[c]; }
@@ -25,12 +28,12 @@ function ccol(c) { return COL[c]; }
 function newSims() {
   const opts = { n: S.n, rate: S.rate, bias: S.bias / 100, profile: S.profile, gp: S.gp, seed: S.seed, vis: true };
   S.sims = {};
-  for (const c of CTRLS) S.sims[c] = new Sim(Object.assign({}, opts, { ctrl: c }));
+  for (const c of CTRLS) S.sims[c] = new Sim(Object.assign({}, opts, { ctrl: c, analyze: c === 'nash', preempt: S.preempt }));
   if (S.sel >= S.n * S.n) S.sel = 0;
-  buildChips(); fillNbrs();
+  buildChips(); fillNbrs(); buildAmbOptions();
 }
 function applyLive() {
-  for (const c of CTRLS) { const s = S.sims[c]; s.rate = S.rate; s.bias = S.bias / 100; s.profile = S.profile; s.gp = Object.assign({}, S.gp); }
+  for (const c of CTRLS) { const s = S.sims[c]; s.rate = S.rate; s.bias = S.bias / 100; s.profile = S.profile; s.gp = Object.assign({}, S.gp); s.preempt = S.preempt; }
 }
 
 /* ---------- drawing the map ---------- */
@@ -141,6 +144,24 @@ function drawBus(ctx, v, brake) {
   ctx.save(); if (brake) { ctx.shadowColor = '#ff2a2a'; ctx.shadowBlur = 7; }
   ctx.fillStyle = brake ? '#ff3b30' : '#8a1616'; ctx.fillRect(-hl - 0.2, -hw + 0.8, 1.4, 2); ctx.fillRect(-hl - 0.2, hw - 2.8, 1.4, 2); ctx.restore();
 }
+function drawAmb(ctx, v, brake) {
+  const L = 20, w = 10, hl = L / 2, hw = w / 2, ph = Math.floor(performance.now() / 170) % 2;
+  ctx.fillStyle = 'rgba(0,0,0,.30)'; rr(ctx, -hl + 1, -hw + 1.8, L, w, 3); ctx.fill();
+  ctx.fillStyle = '#0d0f12';
+  for (const sx of [hl - 5, -hl + 5]) { ctx.fillRect(sx - 2, -hw - 0.7, 4, 1.7); ctx.fillRect(sx - 2, hw - 1, 4, 1.7); }
+  ctx.fillStyle = '#f7f9fb'; rr(ctx, -hl, -hw, L, w, 3); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 0.6; ctx.stroke();
+  ctx.fillStyle = '#d32f2f'; ctx.fillRect(-hl + 1.5, -hw + 0.6, L - 9, 1.1); ctx.fillRect(-hl + 1.5, hw - 1.7, L - 9, 1.1);
+  ctx.fillRect(-hl + 4.2, -0.8, 5.6, 1.6); ctx.fillRect(-hl + 6.2, -2.8, 1.6, 5.6);
+  ctx.fillStyle = '#18232f'; rr(ctx, hl - 4.6, -hw + 1, 3.2, w - 2, 1); ctx.fill();
+  ctx.save();
+  const c1 = ph ? '#ff3b30' : '#3b82f6', c2 = ph ? '#3b82f6' : '#ff3b30';
+  ctx.shadowColor = c1; ctx.shadowBlur = 9; ctx.fillStyle = c1; ctx.fillRect(hl - 7.4, -hw + 0.4, 2, 3.4);
+  ctx.shadowColor = c2; ctx.fillStyle = c2; ctx.fillRect(hl - 7.4, hw - 3.8, 2, 3.4);
+  ctx.restore();
+  ctx.fillStyle = '#fff4c2'; ctx.fillRect(hl - 1.2, -hw + 0.9, 1.4, 2); ctx.fillRect(hl - 1.2, hw - 2.9, 1.4, 2);
+  tailLights(ctx, -hl, hw - 1.1, 2.4, brake);
+}
 function vehicleColors(v) {
   if (v.c1) return;
   if (v.type === 'bus') { const red = v.id % 3 !== 0; v.c1 = red ? '#c0272d' : '#1f5fa8'; v.c2 = red ? '#d9d4cc' : '#e6e9ee'; }
@@ -151,7 +172,8 @@ function vehicleColors(v) {
 function drawVehicle(ctx, v) {
   vehicleColors(v);
   const brake = v.v < 4;
-  if (v.type === 'bus') drawBus(ctx, v, brake); else if (v.type === 'auto') drawAuto(ctx, v, brake);
+  if (v.type === 'amb') drawAmb(ctx, v, brake);
+  else if (v.type === 'bus') drawBus(ctx, v, brake); else if (v.type === 'auto') drawAuto(ctx, v, brake);
   else if (v.type === 'bike') drawBike(ctx, v, brake); else drawCar(ctx, v, brake);
 }
 
@@ -269,11 +291,35 @@ function drawMap() {
     heat(o.q.S, x - RH, y + SO, RH, CFG.detect);
   }
   // vehicles
+  const now = performance.now();
   for (const v of sim.vehicles) {
     const p = sim.xy(v);
+    if (v.emg) { ctx.strokeStyle = 'rgba(226,72,61,.55)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x + v.dx, p.y + v.dy, 17 + 4 * Math.sin(now / 160), 0, 6.2832); ctx.stroke(); }
     ctx.save(); ctx.translate(p.x + v.dx, p.y + v.dy); ctx.rotate(v.ang);
     drawVehicle(ctx, v);
     ctx.restore();
+  }
+  // blocked approaches
+  for (const x of sim.incidents) {
+    const I = sim.inter[x.j], k = x.key, T = 6, off = CFG.laneOff;
+    let bx, by, bw, bh, ox = 0, oy = 0;
+    if (k === 'N') { bx = I.x + 1; by = I.y - SO - T + 1; bw = RH - 2; bh = T; oy = -16; ox = RH / 2; }
+    else if (k === 'S') { bx = I.x - RH + 1; by = I.y + SO - 1; bw = RH - 2; bh = T; oy = 16; ox = -RH / 2; }
+    else if (k === 'W') { bx = I.x - SO - T + 1; by = I.y - RH + 1; bw = T; bh = RH - 2; ox = -16; oy = -RH / 2; }
+    else { bx = I.x + SO - 1; by = I.y + 1; bw = T; bh = RH - 2; ox = 16; oy = RH / 2; }
+    const horiz = bw > bh, segs = 4;
+    for (let q = 0; q < segs; q++) {
+      ctx.fillStyle = q % 2 ? '#ffffff' : '#e2483d';
+      if (horiz) ctx.fillRect(bx + q * bw / segs, by, bw / segs, bh); else ctx.fillRect(bx, by + q * bh / segs, bw, bh / segs);
+    }
+    ctx.strokeStyle = '#7a1e18'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw, bh);
+    const cx = (k === 'N' || k === 'S' ? bx + bw / 2 : bx + bw / 2) + (k === 'W' || k === 'E' ? ox : 0), cy = (k === 'N' || k === 'S' ? by + bh / 2 + oy : by + bh / 2);
+    ctx.fillStyle = 'rgba(226,72,61,' + (0.82 + 0.18 * Math.sin(now / 200)) + ')'; ctx.beginPath(); ctx.arc(cx, cy, 8, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = '700 12px Barlow, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', cx, cy + 0.5);
+    ctx.font = '600 10px Barlow, system-ui, sans-serif'; ctx.fillStyle = COL.ink;
+    const lab = Math.ceil(Math.max(0, x.t1 - sim.t)) + 's', lw = ctx.measureText(lab).width + 8;
+    ctx.fillStyle = COL.pill; rr(ctx, cx - lw / 2, cy + 10, lw, 14, 5); ctx.fill(); ctx.fillStyle = COL.ink; ctx.fillText(lab, cx, cy + 17.5);
+    ctx.textAlign = 'start';
   }
   // signal heads & labels
   ctx.font = '600 11px Barlow, system-ui, sans-serif'; ctx.textBaseline = 'middle';
@@ -311,13 +357,18 @@ function updateKPIs() {
   } else dQ = 'average ' + m.avgQ.toFixed(1);
   const eq = S.ctrl === 'fixed' ? ['\u2014', 'no decisions: fixed timer'] :
     [m.brRounds.toFixed(1) + '<small>rounds</small>', (m.brConv * 100).toFixed(0) + '% of decisions reached equilibrium'];
+  const co2 = m.idleH * IDLE_L_PER_H * KG_CO2_PER_L;
+  const ambSub = m.nAmb ? (S.ctrl !== 'fixed' && mf.nAmb ? '<span class="' + (m.amb <= mf.amb ? 'good' : 'bad') + '">' + sgn(pct(m.amb, mf.amb)) + '%</span> vs fixed-time' : m.nAmb + ' run' + (m.nAmb > 1 ? 's' : '') + ' completed') : (sim.ambulancesActive() ? 'on its way\u2026' : 'send one from the panel');
   const T = [
     ['Average delay', m.delay.toFixed(1) + '<small>s</small>', dDelay || 'per vehicle, all vehicles'],
     ['Vehicles stopped', String(sim.stoppedNow), dQ],
     ['Throughput', String(m.thr60) + '<small>/min</small>', m.exited + ' trips completed'],
     ['Stops per trip', m.stops.toFixed(1), 'stop-and-go events'],
     ['On the map', String(m.inNet), m.pend + ' waiting to enter'],
-    ['Nash equilibrium', eq[0], eq[1]]
+    ['Nash equilibrium', eq[0], eq[1]],
+    ['Idling time', (m.idleH * 60).toFixed(0) + '<small>veh-min</small>', '\u2248 ' + co2.toFixed(1) + ' kg CO\u2082 (illustrative)'],
+    ['Ambulance trip', m.nAmb ? m.amb.toFixed(0) + '<small>s</small>' : '\u2014', ambSub],
+    ['Disruptions', sim.incidents.length + '<small>active</small>', sim.incidents.length ? 'blocked approach in force' : 'none right now']
   ];
   $('kpis').innerHTML = T.map(t => '<div class="kpi"><div class="l">' + t[0] + '</div><div class="v">' + t[1] + '</div><div class="s">' + t[2] + '</div></div>').join('');
 }
@@ -339,7 +390,7 @@ function updateInspector() {
   let h = '<div class="status"><span class="dot ' + cls + '"></span>' + (I.status === 'allred' ? 'All red, clearing the junction' : stTxt + ' for ' + axis) + '<span class="hint" style="margin-left:auto;font-weight:400">' + (I.status === 'green' ? I.greenT.toFixed(0) + ' s in this phase' : '') + '</span></div>';
   const rows = [['N', '\u2193 from north'], ['S', '\u2191 from south'], ['W', '\u2192 from west'], ['E', '\u2190 from east']];
   for (const [k, lab] of rows) {
-    h += '<div class="appr"><span>' + lab + '</span><div class="bar q"><span style="width:' + Math.min(100, o.q[k] * 9) + '%"></span></div><span class="hint">' + o.q[k] + ' queued, ' + o.m[k] + ' near</span></div>';
+    h += '<div class="appr"><span>' + lab + '</span><div class="bar q"><span style="width:' + Math.min(100, o.q[k] * 9) + '%"></span></div><span class="hint">' + (o.blk[k] ? '<b class="bad">blocked</b>' : o.q[k] + ' queued, ' + o.m[k] + ' near') + '</span></div>';
   }
   if (S.ctrl === 'fixed') {
     h += '<div class="why">Fixed timer: switches every ' + CFG.fixedGreen + ' s whatever the queues look like.</div>';
@@ -356,6 +407,76 @@ function updateInspector() {
   $('inspBody').innerHTML = h;
 }
 
+function buildAmbOptions() {
+  const n = S.n, o = [];
+  for (let k = 0; k < n; k++) o.push(['h|' + k + '|1', 'Row ' + (k + 1) + ', from the west'], ['h|' + k + '|-1', 'Row ' + (k + 1) + ', from the east']);
+  for (let k = 0; k < n; k++) o.push(['v|' + k + '|1', 'Column ' + (k + 1) + ', from the north'], ['v|' + k + '|-1', 'Column ' + (k + 1) + ', from the south']);
+  $('selAmb').innerHTML = o.map(x => '<option value="' + x[0] + '">' + x[1] + '</option>').join('');
+}
+function blockApproach() {
+  const key = $('selBlkDir').value, d = +$('selBlkDur').value;
+  for (const c of CTRLS) S.sims[c].addIncident(S.sel, key, d);
+  $('blkNote').textContent = 'J' + (S.sel + 1) + ' ' + KEYLAB[key] + ' approach blocked';
+  refreshPanels(); if (S.tab === 'sim') drawMap();
+}
+function sendAmb() {
+  const [ax, ln, dr] = $('selAmb').value.split('|');
+  for (const c of CTRLS) if (S.sims[c].ambulancesActive() < 3) S.sims[c].sendAmbulance(ax, +ln, +dr);
+  refreshPanels();
+}
+function updateAmb() {
+  const parts = CTRLS.map(c => {
+    const sm = S.sims[c], last = sm.em.length ? sm.em[sm.em.length - 1] : null;
+    return '<span style="color:' + ccol(c) + ';font-weight:600">' + CNAME[c] + '</span>: ' + (last ? '<b>' + last.tt.toFixed(0) + ' s</b>' + (sm.em.length > 1 ? ' <span class="hint">(mean ' + mean(sm.em.map(x => x.tt)).toFixed(0) + ' s, ' + sm.em.length + ' trips)</span>' : '') : (sm.ambulancesActive() ? 'on the way\u2026' : '\u2014'));
+  });
+  $('ambResult').innerHTML = '<div class="hint">Latest ambulance trip, dispatch to exit. One run is noisy: send several, or use the Benchmark tab for an average over seeds.</div><div style="display:grid;gap:2px">' + parts.map(x => '<div>' + x + '</div>').join('') + '</div>' +
+    '<div class="hint" style="margin-top:4px">' + (S.preempt ? 'Preemption is on for Selfish and Nash. Fixed-time cannot sense the ambulance.' : 'Preemption is off: the adaptive controllers treat the ambulance like any other vehicle.') + '</div>';
+}
+function updateEvents() {
+  const ev = S.sims[S.ctrl].events.slice(-14).reverse();
+  const html = ev.length ? ev.map(e => {
+    const cls = /Incident:/.test(e.m) ? 'warn' : /cleared/.test(e.m) ? 'ok' : /mbulance|pre-empt/.test(e.m) ? 'amb' : '';
+    return '<div class="ev ' + cls + '"><b>' + fmtTime(e.t) + '</b><span>' + e.m + '</span></div>';
+  }).join('') : '<div class="empty">Nothing yet. Block an approach or send an ambulance to see events here.</div>';
+  const el = $('evLog'); if (el._h !== html) { el._h = html; el.innerHTML = html; }
+}
+function drawTimeline() {
+  const cv = $('chartTL'); if (!cv.clientWidth) return;
+  const sim = S.sims[S.ctrl], n2 = sim.inter.length, rowH = n2 > 4 ? 17 : 24;
+  cv.style.height = (34 + n2 * rowH + 14) + 'px';
+  const g = setupCv(cv); if (!g) return; const { ctx, w, h } = g;
+  const padL = 34, padR = 8, padT = 6, VIS = 240, plotW = w - padL - padR, tl = sim.tl.slice(-VIS), cw = plotW / VIS;
+  ctx.font = '12px Barlow, system-ui, sans-serif'; ctx.fillStyle = COL.muted; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
+  for (let i = 0; i < n2; i++) ctx.fillText('J' + (i + 1), padL - 6, padT + i * rowH + (rowH - 3) / 2);
+  const x0 = padL + (VIS - tl.length) * cw;
+  tl.forEach((codes, k) => {
+    for (let i = 0; i < n2; i++) {
+      ctx.fillStyle = codes[i] === 0 ? COL.ns : codes[i] === 1 ? COL.ew : COL.tlx;
+      ctx.fillRect(x0 + k * cw, padT + i * rowH, Math.ceil(cw) + 0.5, rowH - 3);
+    }
+  });
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = COL.muted;
+  const base = padT + n2 * rowH + 2;
+  for (let m = 0; m <= 4; m++) { const x = padL + plotW - m * 60 * cw; ctx.fillText(m === 0 ? 'now' : '\u2212' + m + ' min', x, base); }
+}
+function updateEq() {
+  const sim = S.sims.nash, eq = sim.eq, m = sim.metrics();
+  if (!eq) { $('eqKpis').innerHTML = ''; $('eqTable').innerHTML = ''; $('eqNote').textContent = 'Waiting for the first decision.'; return; }
+  const T = [
+    ['Joint plans checked', String(eq.M), '2^' + eq.F + ' for the ' + eq.F + ' junction' + (eq.F > 1 ? 's' : '') + ' free to change'],
+    ['Pure Nash equilibria', String(eq.nNE), 'average ' + (isNaN(m.eqNE) ? '\u2014' : m.eqNE.toFixed(2)) + ' per decision'],
+    ['Equilibrium efficiency', (eq.eff * 100).toFixed(0) + '<small>%</small>', 'average ' + (isNaN(m.eqEff) ? '\u2014' : (m.eqEff * 100).toFixed(1) + '%') + ' \u00b7 best plan in ' + (isNaN(m.eqOpt) ? '\u2014' : (m.eqOpt * 100).toFixed(0) + '%') + ' of decisions']
+  ];
+  $('eqKpis').innerHTML = T.map(t => '<div class="kpi"><div class="l">' + t[0] + '</div><div class="v">' + t[1] + '</div><div class="s">' + t[2] + '</div></div>').join('');
+  const arrows = pl => pl.map(a => '<span class="arrow ' + (a === 0 ? 'ns' : 'ew') + '">' + (a === 0 ? '\u2195' : '\u2194') + '</span>').join('');
+  let h = '<thead><tr><th>Rank</th><th class="tag">Plan (J1\u2026J' + sim.inter.length + ')</th><th>Total payoff</th><th class="tag">What it is</th></tr></thead><tbody>';
+  const tags = x => [x.ne ? 'Nash equilibrium' : '', x.found ? 'chosen by best-response' : ''].filter(Boolean).join(' \u00b7 ') || '\u2014';
+  eq.top.forEach((x, i) => { h += '<tr><td class="' + (x.found ? 'sel' : '') + '">' + (i + 1) + '</td><td class="tag ' + (x.found ? 'sel' : '') + '">' + arrows(x.pl) + '</td><td class="' + (x.found ? 'sel' : '') + '">' + x.w.toFixed(1) + '</td><td class="tag ' + (x.found ? 'sel' : '') + '">' + tags(x) + '</td></tr>'; });
+  if (eq.foundRank > eq.top.length && eq.foundPl) h += '<tr><td class="sel">' + eq.foundRank + '</td><td class="tag sel">' + arrows(eq.foundPl) + '</td><td class="sel">' + eq.wF.toFixed(1) + '</td><td class="tag sel">' + (eq.foundIsNE ? 'Nash equilibrium \u00b7 ' : '') + 'chosen by best-response</td></tr>';
+  $('eqTable').innerHTML = h + '</tbody>';
+  $('eqNote').innerHTML = 'Top ' + eq.top.length + ' of ' + eq.M + ' plans by total payoff (sum over all junctions). ' + (eq.foundIsOpt ? '<b class="good">The equilibrium found is also the best plan.</b>' : 'The equilibrium found is rank ' + eq.foundRank + ': stable, but not the best joint outcome. That gap is the <i>price of anarchy</i> of this game.');
+}
+
 /* ---------- charts ---------- */
 function setupCv(cv) {
   const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight;
@@ -366,16 +487,18 @@ function setupCv(cv) {
 }
 function niceMax(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
 function niceStep(v) { const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
-function drawLines(cv, series, xLabel) {
+function drawLines(cv, series, xLabel, zoom) {
   const g = setupCv(cv); if (!g) return; const { ctx, w, h } = g;
   const pad = { l: 44, r: 14, t: 10, b: 38 };
-  let xmax = 0, ymax = 0;
-  for (const s of series) for (const p of s.pts) { if (p.x > xmax) xmax = p.x; if (p.y > ymax) ymax = p.y; }
-  ymax = niceMax(ymax * 1.08); xmax = Math.max(xmax, 1);
-  const X = x => pad.l + x / xmax * (w - pad.l - pad.r), Y = y => h - pad.b - y / ymax * (h - pad.t - pad.b);
+  let xmax = 0, ymax = 0, ymin = 0, lo = Infinity;
+  for (const s of series) for (const p of s.pts) { if (p.x > xmax) xmax = p.x; if (p.y > ymax) ymax = p.y; if (p.y < lo) lo = p.y; }
+  if (zoom) { ymin = Math.floor(lo * 0.9 / 5) * 5; ymax = Math.ceil(ymax * 1.05 / 5) * 5; if (ymax - ymin < 10) ymax = ymin + 10; }
+  else ymax = niceMax(ymax * 1.08);
+  xmax = Math.max(xmax, 1);
+  const X = x => pad.l + x / xmax * (w - pad.l - pad.r), Y = y => h - pad.b - (y - ymin) / (ymax - ymin) * (h - pad.t - pad.b);
   ctx.font = '12px Barlow, system-ui, sans-serif'; ctx.fillStyle = COL.muted; ctx.strokeStyle = COL.grid; ctx.lineWidth = 1;
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  for (let i = 0; i <= 4; i++) { const v = ymax * i / 4, y = Y(v); ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke(); ctx.fillText(String(Math.round(v * 10) / 10), pad.l - 6, y); }
+  for (let i = 0; i <= 4; i++) { const v = ymin + (ymax - ymin) * i / 4, y = Y(v); ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke(); ctx.fillText(String(Math.round(v * 10) / 10), pad.l - 6, y); }
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   const st = niceStep(xmax / 4);
   for (let v = 0; v <= xmax + 1e-9; v += st) ctx.fillText(v.toFixed(st < 1 ? 1 : 0), X(v), h - pad.b + 6);
@@ -471,16 +594,25 @@ function scenarioText() {
   const b = S.bias; const mix = b === 0 ? 'balanced mix' : (b > 0 ? 'East\u2013West +' + b + '%' : 'North\u2013South +' + (-b) + '%');
   return S.n + '\u00d7' + S.n + ' grid \u00b7 ' + S.rate + ' veh/min per entry \u00b7 ' + mix + ' \u00b7 ' + (S.profile === 'rush' ? 'rush-hour wave' : 'steady demand');
 }
+const DISRUPT_LABEL = { none: 'no disruptions', incident: 'blocked approaches', amb: 'ambulance runs', both: 'blocked approaches and ambulance runs' };
+function disruptionPlan(mode, n, dur) {
+  const ev = [];
+  if (mode === 'incident' || mode === 'both') { ev.push({ t: 240, f: s => s.addIncident(0, 'N', 120) }); ev.push({ t: 540, f: s => s.addIncident(n * n - 1, 'S', 120) }); }
+  if (mode === 'amb' || mode === 'both') { ev.push({ t: 180, f: s => s.sendAmbulance('h', 0, 1) }); ev.push({ t: 480, f: s => s.sendAmbulance('v', 0, 1) }); ev.push({ t: 720, f: s => s.sendAmbulance('h', n - 1, -1) }); }
+  return ev.filter(e => e.t < dur - 60).sort((a, b) => a.t - b.t);
+}
+const tick = () => new Promise(r => setTimeout(r, 0));
 async function runBenchmark() {
   const btn = $('btnBench'); btn.disabled = true;
-  const nSeeds = +$('selSeeds').value, dur = +$('selDur').value, steps = Math.round(dur / CFG.dt);
-  const opts = { n: S.n, rate: S.rate, bias: S.bias / 100, profile: S.profile, gp: S.gp, keepDelays: true };
+  const nSeeds = +$('selSeeds').value, dur = +$('selDur').value, steps = Math.round(dur / CFG.dt), disrupt = $('selDisrupt').value;
+  const opts = { n: S.n, rate: S.rate, bias: S.bias / 100, profile: S.profile, gp: S.gp, keepDelays: true, preempt: S.preempt };
   const R = { fixed: [], selfish: [], nash: [] }, SER = { fixed: [], selfish: [], nash: [] };
   const total = nSeeds * 3; let done = 0; const t0 = performance.now();
   for (let k = 0; k < nSeeds; k++) {
     for (const c of CTRLS) {
-      const sim = makeSim(opts, c, 1000 + k * 101);
+      const sim = makeSim(opts, c, 1000 + k * 101), plan = disruptionPlan(disrupt, S.n, dur); let pi = 0;
       for (let s = 0; s < steps; s++) {
+        while (pi < plan.length && sim.t >= plan[pi].t) plan[pi++].f(sim);
         sim.step();
         if (s % 1500 === 1499) { $('benchBar').style.width = ((done + s / steps) / total * 100).toFixed(1) + '%'; $('benchStatus').textContent = 'Running seed ' + (k + 1) + ' of ' + nSeeds + ', ' + CNAME[c] + '\u2026'; await new Promise(r => setTimeout(r, 0)); }
       }
@@ -491,8 +623,8 @@ async function runBenchmark() {
   $('benchBar').style.width = '100%';
   $('benchStatus').textContent = 'Done in ' + ((performance.now() - t0) / 1000).toFixed(1) + ' s.';
   const meanSeries = c => { const L = Math.min(...SER[c].map(a => a.length)); const out = []; for (let i = 0; i < L; i++) out.push({ x: (i + 1) * 5 / 60, y: mean(SER[c].map(a => a[i])) }); return out; };
-  S.bench = { R, dur, nSeeds, scen: scenarioText(), series: CTRLS.map(c => ({ name: CNAME[c], color: c, pts: meanSeries(c) })) };
-  renderBench(); btn.disabled = false;
+  S.bench = { R, dur, nSeeds, disrupt, preempt: S.preempt, gp: Object.assign({}, S.gp), scen: scenarioText() + (disrupt === 'none' ? '' : ' \u00b7 ' + DISRUPT_LABEL[disrupt]), opts: { n: S.n, rate: S.rate, bias: S.bias, profile: S.profile }, series: CTRLS.map(c => ({ name: CNAME[c], color: c, pts: meanSeries(c) })) };
+  renderBench(); saveHistory(); btn.disabled = false;
 }
 function renderBench() {
   const B = S.bench; if (!B) return; $('benchOut').hidden = false;
@@ -503,18 +635,23 @@ function renderBench() {
     ['Average vehicles stopped', m => m.avgQ, 'low', 1],
     ['Stops per trip', m => m.stops, 'low', 2],
     ['Throughput (trips per minute)', m => m.thr, 'high', 1],
+    ['Idling time (vehicle-hours)', m => m.idleH, 'low', 2],
+    ['Est. CO\u2082 from idling (kg, illustrative)', m => m.idleH * IDLE_L_PER_H * KG_CO2_PER_L, 'low', 1],
     ['Signal switches per junction per hour', m => m.sw / (S.n * S.n) / (B.dur / 3600), 'info', 0]
   ];
+  if (B.disrupt === 'amb' || B.disrupt === 'both') rows.splice(2, 0, ['Ambulance trip time (s)', m => m.amb, 'low', 1]);
   let t = '<thead><tr><th>Metric</th>' + CTRLS.map(c => '<th style="color:' + ccol(c) + '">' + CNAME[c] + '</th>').join('') + '<th>Nash vs fixed</th><th>Nash vs selfish</th></tr></thead><tbody>';
   const cmp = (f, a, b, dir) => {
-    const x = col(a, f), y = col(b, f), tt = pairedT(x, y), ch = pct(mean(x), mean(y));
+    const x = col(a, f), y = col(b, f);
+    if (x.some(isNaN) || y.some(isNaN)) return '<span class="hint">n/a</span>';
+    const tt = pairedT(x, y), ch = pct(mean(x), mean(y));
     const better = dir === 'low' ? ch < 0 : ch > 0, sig = tt.p < 0.05 && dir !== 'info';
     return '<span class="' + (sig ? (better ? 'good' : 'bad') : '') + '">' + sgn(ch, 1) + '%</span> <span class="hint">p=' + (isNaN(tt.p) ? 'n/a' : (tt.p < 0.001 ? '<0.001' : tt.p.toFixed(3))) + '</span>';
   };
   for (const [name, f, dir, dp] of rows) {
     const means = CTRLS.map(c => mean(col(c, f)));
     const best = dir === 'info' ? NaN : (dir === 'low' ? Math.min(...means) : Math.max(...means));
-    t += '<tr><td>' + name + '</td>' + CTRLS.map((c, i) => '<td class="' + (means[i] === best ? 'win' : '') + '">' + means[i].toFixed(dp) + ' <span class="hint">\u00b1 ' + sd(col(c, f)).toFixed(dp) + '</span></td>').join('') + '<td>' + cmp(f, 'nash', 'fixed', dir) + '</td><td>' + cmp(f, 'nash', 'selfish', dir) + '</td></tr>';
+    t += '<tr><td>' + name + '</td>' + CTRLS.map((c, i) => '<td class="' + (means[i] === best ? 'win' : '') + '">' + (isNaN(means[i]) ? 'n/a' : means[i].toFixed(dp) + ' <span class="hint">\u00b1 ' + sd(col(c, f)).toFixed(dp) + '</span>') + '</td>').join('') + '<td>' + cmp(f, 'nash', 'fixed', dir) + '</td><td>' + cmp(f, 'nash', 'selfish', dir) + '</td></tr>';
   }
   $('benchTable').innerHTML = t + '</tbody>';
   // summary
@@ -528,6 +665,11 @@ function renderBench() {
   if (tS.p < 0.05 && cS < 0) s += '<p>Adding neighbour-aware payoffs (spillback and coordination) gave a further <b>' + Math.abs(cS).toFixed(1) + '%</b> reduction over the selfish version (' + P(tS.p) + ').</p>';
   else if (tS.p < 0.05 && cS > 0) s += '<p>In this scenario the neighbour-aware payoffs were <b>' + cS.toFixed(1) + '% worse</b> than the selfish version (' + P(tS.p) + '). Try a smaller \u03bb on the Game model tab.</p>';
   else s += '<p>The difference between Nash and selfish (' + sgn(cS, 1) + '%, ' + P(tS.p) + ') is <b>not statistically significant</b> here. Coordination terms matter most when links are nearly full, so try Heavy load or the 3\u00d73 grid.</p>';
+  if ((B.disrupt === 'amb' || B.disrupt === 'both') && !col('nash', m => m.amb).some(isNaN) && !col('fixed', m => m.amb).some(isNaN)) {
+    const aN = col('nash', m => m.amb), aF = col('fixed', m => m.amb), tA = pairedT(aN, aF);
+    s += '<p>Ambulance trip: <b>' + mean(aN).toFixed(1) + ' s</b> with the Nash controller' + (B.preempt ? ' (preemption on)' : ' (preemption off)') + ' against <b>' + mean(aF).toFixed(1) + ' s</b> with fixed-time, ' + sgn(pct(mean(aN), mean(aF)), 1) + '% (' + P(tA.p) + ').</p>';
+  }
+  if (B.disrupt === 'incident' || B.disrupt === 'both') s += '<p>Blocked approaches were injected at the same moments for every controller. Adaptive controllers see the blockage through their detectors and stop giving it green; fixed-time cannot.</p>';
   $('benchSummary').innerHTML = s;
   $('benchScenario').textContent = B.scen;
   drawBenchCharts();
@@ -541,6 +683,105 @@ function drawBenchCharts() {
   drawBars($('bb3'), 'Vehicles stopped', mk(m => m.avgQ), 'lower is better');
   drawBars($('bb4'), 'Throughput (trips/min)', mk(m => m.thr), 'higher is better');
   drawLines($('chartBench'), B.series.map(s => ({ color: ccol(s.color), pts: s.pts })), 'minutes \u00b7 vehicles stopped');
+}
+function drawSweepChart() {
+  const W = S.sweep; if (!W || $('sweepOut').hidden) return;
+  const xs = W.pts.map(p => p.x), x1 = Math.max(...xs);
+  drawLines($('chartSweep'), [
+    { color: ccol('fixed'), pts: [{ x: 0, y: W.fixed }, { x: x1, y: W.fixed }] },
+    { color: ccol('selfish'), pts: [{ x: 0, y: W.selfish }, { x: x1, y: W.selfish }] },
+    { color: ccol('nash'), pts: W.pts.map(p => ({ x: p.x, y: p.y })) }
+  ], '\u03bb \u00b7 average delay (s)', true);
+}
+
+/* ---------- export, history, sweep ---------- */
+function download(name, text, type) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+function benchRows() {
+  const B = S.bench, out = [];
+  for (const c of CTRLS) B.R[c].forEach((m, k) => out.push({ controller: c, seed: 1000 + k * 101, delay_s: m.delay, p95_delay_s: m.p95, avg_stopped: m.avgQ, stops_per_trip: m.stops, throughput_per_min: m.thr,
+    switches: m.sw, idle_vehicle_hours: m.idleH, ambulance_trip_s: isNaN(m.amb) ? '' : m.amb }));
+  return out;
+}
+function exportCsv() {
+  if (!S.bench) return; const B = S.bench, rows = benchRows(), cols = Object.keys(rows[0]);
+  const head = ['grid', 'rate_per_min', 'direction_bias_pct', 'demand', 'disruptions', 'duration_s', 'omega', 'sigma', 'lambda', 'kappa', 'preemption'];
+  const pre = [B.opts.n + 'x' + B.opts.n, B.opts.rate, B.opts.bias, B.opts.profile, B.disrupt, B.dur, B.gp.omega, B.gp.sigma, B.gp.lam, B.gp.kap, B.preempt ? 'on' : 'off'];
+  const f = v => typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(4)) : String(v);
+  download('traffic_benchmark.csv', head.concat(cols).join(',') + '\n' + rows.map(r => pre.concat(cols.map(c => f(r[c]))).join(',')).join('\n') + '\n', 'text/csv');
+}
+function exportJson() {
+  if (!S.bench) return; const B = S.bench;
+  download('traffic_benchmark.json', JSON.stringify({ scenario: B.scen, options: B.opts, gameParameters: B.gp, preemption: B.preempt, disruptions: B.disrupt, durationSeconds: B.dur, seeds: B.nSeeds, results: benchRows() }, null, 1), 'application/json');
+}
+const HKEY = 'tsgt_history_v1';
+function loadHistory() { try { return JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch (e) { return []; } }
+function saveHistory() {
+  const B = S.bench; if (!B) return;
+  const dl = c => mean(B.R[c].map(m => m.delay));
+  const pF = pairedT(B.R.nash.map(m => m.delay), B.R.fixed.map(m => m.delay)), pS = pairedT(B.R.nash.map(m => m.delay), B.R.selfish.map(m => m.delay));
+  const h = loadHistory(); h.unshift({ ts: Date.now(), scen: B.scen, nSeeds: B.nSeeds, dur: B.dur, lam: B.gp.lam, fixed: dl('fixed'), selfish: dl('selfish'), nash: dl('nash'), pF: pF.p, pS: pS.p });
+  try { localStorage.setItem(HKEY, JSON.stringify(h.slice(0, 20))); } catch (e) { /* storage unavailable */ }
+  renderHistory();
+}
+function renderHistory() {
+  const h = loadHistory(), P = p => isNaN(p) ? 'n/a' : (p < 0.001 ? '<0.001' : p.toFixed(3));
+  if (!h.length) { $('histTable').innerHTML = ''; $('histNote').textContent = 'No saved runs yet. Each benchmark you run is stored here, in this browser only.'; return; }
+  let t = '<thead><tr><th>When</th><th style="text-align:left">Scenario</th><th>Seeds \u00d7 min</th><th>\u03bb</th><th>Fixed (s)</th><th>Selfish (s)</th><th>Nash (s)</th><th>Nash vs fixed</th><th>Nash vs selfish</th></tr></thead><tbody>';
+  for (const r of h) t += '<tr><td>' + new Date(r.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '</td><td style="text-align:left;white-space:normal;min-width:240px">' + r.scen + '</td><td>' + r.nSeeds + ' \u00d7 ' + Math.round(r.dur / 60) + '</td><td>' + (+r.lam).toFixed(1) + '</td><td>' + r.fixed.toFixed(1) + '</td><td>' + r.selfish.toFixed(1) + '</td><td>' + r.nash.toFixed(1) + '</td><td>' + sgn(pct(r.nash, r.fixed), 1) + '% <span class="hint">p=' + P(r.pF) + '</span></td><td>' + sgn(pct(r.nash, r.selfish), 1) + '% <span class="hint">p=' + P(r.pS) + '</span></td></tr>';
+  $('histTable').innerHTML = t + '</tbody>'; $('histNote').textContent = 'Newest first, up to 20 runs. Stored locally in your browser.';
+}
+async function runSweep() {
+  const btn = $('btnSweep'); btn.disabled = true; $('btnApplyLam').hidden = true;
+  const lams = [0, 0.3, 0.6, 0.9, 1.2, 1.8, 2.4, 3.0], seeds = [1000, 1101, 1202], dur = 600, steps = Math.round(dur / CFG.dt);
+  const base = { n: S.n, rate: S.rate, bias: S.bias / 100, profile: S.profile, preempt: S.preempt };
+  const total = (lams.length + 2) * seeds.length; let done = 0; const t0 = performance.now();
+  const one = async (ctrl, gp, seed, label) => {
+    const sim = makeSim(Object.assign({}, base, { gp }), ctrl, seed);
+    for (let k = 0; k < steps; k++) { sim.step(); if (k % 2000 === 1999) { $('sweepBar').style.width = ((done + k / steps) / total * 100).toFixed(1) + '%'; $('sweepStatus').textContent = 'Running ' + label + '\u2026'; await tick(); } }
+    done++; return sim.metrics().delay;
+  };
+  const fx = [], sf = [];
+  for (const sd0 of seeds) fx.push(await one('fixed', S.gp, sd0, 'fixed-time'));
+  for (const sd0 of seeds) sf.push(await one('selfish', S.gp, sd0, 'selfish'));
+  const pts = [];
+  for (const lam of lams) { const v = []; for (const sd0 of seeds) v.push(await one('nash', Object.assign({}, S.gp, { lam }), sd0, 'Nash, \u03bb = ' + lam)); pts.push({ x: lam, y: mean(v), sd: sd(v) }); }
+  $('sweepBar').style.width = '100%'; $('sweepStatus').textContent = 'Done in ' + ((performance.now() - t0) / 1000).toFixed(1) + ' s.';
+  const best = pts.reduce((a, b) => b.y < a.y ? b : a), at = l => pts.find(p => Math.abs(p.x - l) < 1e-9);
+  S.sweep = { pts, fixed: mean(fx), selfish: mean(sf), best };
+  $('sweepOut').hidden = false;
+  $('sweepLegend').innerHTML = [['fixed', 'Fixed-time'], ['selfish', 'Selfish (\u03bb = 0 game)'], ['nash', 'Nash game at each \u03bb']].map(([c, l]) => '<span class="pill"><i style="background:' + ccol(c) + '"></i>' + l + '</span>').join('');
+  const l0 = at(0), l6 = at(0.6), l3 = at(3.0);
+  let h = '<p>Scenario: ' + scenarioText() + '. 3 seeds, 10 simulated minutes each.</p>';
+  h += '<p>The lowest average delay was at <b>\u03bb = ' + best.x.toFixed(1) + '</b> (' + best.y.toFixed(1) + ' s). The default \u03bb = 0.6 gave ' + l6.y.toFixed(1) + ' s, \u03bb = 0 gave ' + l0.y.toFixed(1) + ' s, and \u03bb = 3 gave ' + l3.y.toFixed(1) + ' s. Fixed-time was ' + S.sweep.fixed.toFixed(1) + ' s.</p>';
+  const spread = Math.max(...pts.map(p => p.sd));
+  h += '<p class="hint">' + (Math.abs(l0.y - best.y) < spread ? 'The curve is flat within the seed-to-seed spread (\u00b1' + spread.toFixed(1) + ' s) for small \u03bb, so neighbour-awareness is worth little at this load. ' : 'Neighbour-awareness changes delay by more than the seed-to-seed spread here. ') + (l3.y > l6.y ? 'Large \u03bb makes junctions over-cautious and delay rises again.' : 'Large \u03bb did not hurt in this scenario.') + '</p>';
+  $('sweepSummary').innerHTML = h; $('btnApplyLam').hidden = false; $('btnApplyLam').textContent = 'Apply \u03bb = ' + best.x.toFixed(1);
+  drawSweepChart(); btn.disabled = false;
+}
+
+/* ---------- shareable scenario link ---------- */
+function hashEncode() {
+  const p = new URLSearchParams({ n: S.n, rate: S.rate, bias: S.bias, profile: S.profile, seed: S.seed, o: S.gp.omega, s: S.gp.sigma, l: S.gp.lam, k: S.gp.kap, c: S.ctrl });
+  return location.href.split('#')[0] + '#' + p.toString();
+}
+function hashApply() {
+  if (location.hash.length < 2) return;
+  const p = new URLSearchParams(location.hash.slice(1)), num = (k, lo, hi, d) => { const v = parseFloat(p.get(k)); return isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
+  S.n = num('n', 2, 3, S.n) >= 2.5 ? 3 : 2; S.rate = Math.round(num('rate', 2, 14, S.rate)); S.bias = Math.round(num('bias', -60, 60, S.bias) / 5) * 5;
+  if (p.get('profile') === 'rush' || p.get('profile') === 'steady') S.profile = p.get('profile');
+  S.seed = Math.round(num('seed', 1, 99999, S.seed));
+  S.gp = { omega: num('o', 0, 5, S.gp.omega), sigma: num('s', 0, 5, S.gp.sigma), lam: num('l', 0, 5, S.gp.lam), kap: num('k', 0, 5, S.gp.kap) };
+  if (CTRLS.includes(p.get('c'))) S.ctrl = p.get('c');
+}
+function stampHash() { try { history.replaceState(null, '', hashEncode()); } catch (e) { /* not available */ } }
+async function shareLink() {
+  const url = hashEncode(); stampHash();
+  try { await navigator.clipboard.writeText(url); $('btnShare').textContent = 'Link copied'; }
+  catch (e) { window.prompt('Copy this link', url); $('btnShare').textContent = 'Link ready'; }
+  setTimeout(() => { $('btnShare').textContent = 'Share link'; }, 1800);
 }
 
 /* ---------- wiring ---------- */
@@ -564,19 +805,20 @@ function showTab(t) {
   requestAnimationFrame(() => { drawAll(); });
 }
 function drawAll() {
-  if (S.tab === 'sim') { drawMap(); drawLive(); }
-  if (S.tab === 'bench') drawBenchCharts();
+  if (S.tab === 'sim') { drawMap(); drawLive(); drawTimeline(); }
+  if (S.tab === 'bench') { drawBenchCharts(); drawSweepChart(); }
 }
 function refreshPanels() {
-  if (S.tab === 'sim') { updateKPIs(); updateScore(); updateInspector(); drawLive(); }
-  else if (S.tab === 'game') updateGame();
+  if (S.tab === 'sim') { updateKPIs(); updateScore(); updateInspector(); drawLive(); updateAmb(); updateEvents(); drawTimeline(); }
+  else if (S.tab === 'game') { updateGame(); updateEq(); }
 }
 function init() {
+  hashApply();
   readColors();
-  syncControls(); syncParams(); setPlayIcon(); newSims();
+  syncControls(); syncParams(); setPlayIcon(); setSeg('segCtrl', 'c', S.ctrl); newSims(); renderHistory();
   document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
   $('btnPlay').addEventListener('click', () => { S.playing = !S.playing; setPlayIcon(); });
-  $('btnReset').addEventListener('click', () => { S.seed = Math.max(1, Math.min(99999, parseInt($('numSeed').value, 10) || 42)); newSims(); refreshPanels(); if (S.tab === 'sim') drawMap(); });
+  $('btnReset').addEventListener('click', () => { S.seed = Math.max(1, Math.min(99999, parseInt($('numSeed').value, 10) || 42)); newSims(); refreshPanels(); stampHash(); if (S.tab === 'sim') drawMap(); });
   $('segSpeed').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.speed = +b.dataset.v; setSeg('segSpeed', 'v', S.speed); });
   $('segCtrl').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.ctrl = b.dataset.c; setSeg('segCtrl', 'c', S.ctrl); refreshPanels(); drawMap(); });
   $('segMetric').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.metric = b.dataset.m; setSeg('segMetric', 'm', S.metric); drawLive(); });
@@ -601,6 +843,25 @@ function init() {
     $(id).addEventListener('input', e => { S.gp[k] = +e.target.value; syncParams(); applyLive(); });
   $('btnGpReset').addEventListener('click', () => { S.gp = Object.assign({}, GP_DEFAULT); syncParams(); applyLive(); });
   $('btnBench').addEventListener('click', runBenchmark);
+  $('btnShare').addEventListener('click', shareLink);
+  $('btnBlock').addEventListener('click', blockApproach);
+  $('btnAmb').addEventListener('click', sendAmb);
+  $('chkPre').addEventListener('change', e => { S.preempt = e.target.checked; applyLive(); updateAmb(); });
+  $('btnCsv').addEventListener('click', exportCsv); $('btnJson').addEventListener('click', exportJson);
+  $('btnSweep').addEventListener('click', runSweep);
+  $('btnApplyLam').addEventListener('click', () => { S.gp.lam = S.sweep.best.x; syncParams(); applyLive(); $('btnApplyLam').textContent = 'Applied'; });
+  $('btnHistClear').addEventListener('click', () => { try { localStorage.removeItem(HKEY); } catch (e) { /* ignore */ } renderHistory(); });
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const tg = e.target && e.target.tagName; if (tg === 'INPUT' || tg === 'SELECT' || tg === 'TEXTAREA' || tg === 'BUTTON' && e.key === ' ') return;
+    if (S.tab !== 'sim' && S.tab !== 'game') return;
+    const k = e.key.toLowerCase();
+    if (k === ' ') { S.playing = !S.playing; setPlayIcon(); e.preventDefault(); }
+    else if (k === '1' || k === '2' || k === '3') { S.ctrl = CTRLS[+k - 1]; setSeg('segCtrl', 'c', S.ctrl); refreshPanels(); drawMap(); }
+    else if (k === 'b') blockApproach();
+    else if (k === 'a') sendAmb();
+    else if (k === 'r') $('btnReset').click();
+  });
   $('btnTheme').addEventListener('click', () => {
     const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
     document.documentElement.dataset.theme = dark ? 'light' : 'dark'; readColors(); drawAll();
